@@ -22,6 +22,16 @@
 
 `projects/py/<project>` を増やしたら `ci.yml` の job を追加する（または matrix 化する）。
 
+## workflow ファイルの push には SSH を使う
+
+gh の OAuth トークン（`repo` scope のみ）では `.github/workflows/` の push が
+`refusing to allow an OAuth App to create or update workflow ... without workflow scope` で拒否される。
+SSH 鍵は scope 制限を受けないため、SSH alias 経由で push する:
+
+```bash
+git push git@github-tan3159:tan3159/trade-scripts.git <branch>
+```
+
 ## 関連
 
 - `docs/setup/pre-commit.md` — commit 段階のローカル検知（第一防衛線）
