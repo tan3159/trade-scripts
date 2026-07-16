@@ -1,5 +1,6 @@
 # このファイルは copier が自動更新する。手動編集しないこと。
-_src_path: /home/tan3159/repos/ai-dev-handbook/templates/workflow
+_commit: v2026.07.17.2
+_src_path: git+https://github.com/being-gaia-plan/ai-dev-handbook.git
 github_org: tan3159
 min_python_version: '3.11'
 notification_email: tan3159@gmail.com

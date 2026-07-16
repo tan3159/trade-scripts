@@ -18,7 +18,9 @@
 #   4. 品質ゲート系（validate-issue 等）
 #   5. 自動化系（label-pr 等）
 #
-# デフォルト: すべての hook は有効（~/.config/tidd_tools/hooks-config.json でオーバーライド可）
+# デフォルト: opt-in 設計（#2166）。安全系 3 hook（require-issue・block-dangerous-git・
+# ban-claude-p）のみ default ON、他は default OFF。~/.config/tidd_tools/hooks-config.json
+# で有効化する（キーに true を設定）。
 # 参照: .claude/hooks/_lib/hook_io.py の is_hook_enabled()
 
 groups:
@@ -62,6 +64,7 @@ groups:
       - label-pr
       - auto-ruff-format
       - session-start-cache
+      - session-start-health-check
       - on-stop
       - analyze-loop-on-stop
       - yaru-auto-tick

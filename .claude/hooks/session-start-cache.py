@@ -20,6 +20,7 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -29,16 +30,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.hook_io import is_hook_enabled, read_hook_input  # noqa: E402
 
+
 def _resolve_cache_dir() -> Path:
     """キャッシュディレクトリを git remote origin URL のリポジトリ名から動的に解決する.
 
     worktree でも canonical な repo 名を使うため git remote get-url origin で取得する。
     """
     import re
+
     try:
         r = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             m = re.search(r"/([^/]+?)(?:\.git)?$", r.stdout.strip())
@@ -131,7 +137,7 @@ def _portable_path(path: Path) -> str:
     home = str(Path.home())
     s = str(path)
     if s.startswith(home + "/") or s == home:
-        return "~" + s[len(home):]
+        return "~" + s[len(home) :]
     return s
 
 
@@ -161,7 +167,11 @@ def _classify_sqlite_error(exc: sqlite3.Error) -> tuple[str, str]:
     """
     msg = str(exc).lower()
     if isinstance(exc, sqlite3.OperationalError):
-        if "database or disk is full" in msg or "disk is full" in msg or "disk full" in msg:
+        if (
+            "database or disk is full" in msg
+            or "disk is full" in msg
+            or "disk full" in msg
+        ):
             return (
                 "disk_full",
                 "解決手順: 不要ファイルを削除するかディスク容量を追加してください。",
@@ -221,8 +231,12 @@ def _expires_at(kind: str = "default") -> int:
 
 def _fetch_prs(conn: sqlite3.Connection) -> None:
     raw = _gh(
-        "pr", "list", "--state", "open",
-        "--json", "number,title,labels,headRefName,headRefOid,state",
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,labels,headRefName,headRefOid,state",
     )
     if raw:
         try:
@@ -240,8 +254,14 @@ def _fetch_prs(conn: sqlite3.Connection) -> None:
 
     # 最近マージ済みの PR も取得（git branch -D の safety check に使用）
     merged_raw = _gh(
-        "pr", "list", "--state", "merged", "--limit", "10",
-        "--json", "number,headRefName,headRefOid,state",
+        "pr",
+        "list",
+        "--state",
+        "merged",
+        "--limit",
+        "10",
+        "--json",
+        "number,headRefName,headRefOid,state",
     )
     if merged_raw:
         try:
@@ -263,7 +283,16 @@ def _fetch_prs(conn: sqlite3.Connection) -> None:
 
 
 def _fetch_issues(conn: sqlite3.Connection) -> None:
-    raw = _gh("issue", "list", "--state", "open", "--limit", "1000", "--json", "number,title,labels")
+    raw = _gh(
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--limit",
+        "1000",
+        "--json",
+        "number,title,labels",
+    )
     if not raw:
         return
     try:
@@ -286,7 +315,14 @@ def _fetch_current_branch_pr(conn: sqlite3.Connection) -> None:
         # ブランチが特定できない場合は古い singleton を削除してキャッシュを無効化する
         conn.execute("DELETE FROM current_branch_pr WHERE singleton = 1")
         return
-    raw = _gh("pr", "view", "--json", "number,title,state,headRefName,headRefOid,body", "--", branch)
+    raw = _gh(
+        "pr",
+        "view",
+        "--json",
+        "number,title,state,headRefName,headRefOid,body",
+        "--",
+        branch,
+    )
     if not raw:
         # gh 失敗は API 障害の可能性があるため singleton は保持する（stale cache として機能）
         # get_current_branch_pr() が headRefName でブランチ一致を検証するので安全
@@ -309,6 +345,89 @@ def _fetch_current_branch_pr(conn: sqlite3.Connection) -> None:
         "INSERT OR REPLACE INTO pr_list (head_ref, data, expires_at) VALUES (?, ?, ?)",
         (ref, json.dumps(pr_data, ensure_ascii=False), exp),
     )
+
+
+_MODULE_NOT_FOUND_MARKER = "No module named tidd_tools"
+
+
+def _report_health_check_failure(result: subprocess.CompletedProcess[str]) -> None:
+    """health-check の失敗結果を stdout に警告として出力する."""
+    lines = result.stderr.splitlines()[:20]
+    detail = "\n".join(lines)
+    sys.stdout.write(
+        f"session-start-health-check: tidd health-check が失敗しました。\n{detail}\n"
+    )
+
+
+def _run_health_check() -> None:
+    """SessionStart 時に tidd health-check を実行し、失敗時に stdout へ警告を出す（Issue #2205）.
+
+    機能キー ``session-start-health-check`` で on/off できる（``session-start-cache`` とは独立）。
+    git root が取得できない場合は silent skip する。
+    ``OSError`` / ``subprocess.TimeoutExpired`` は silent skip（セッション開始をブロックしない）。
+    exit 0 なら何も出力しない。exit != 0 なら stdout に警告 + stderr 先頭 20 行を出力する。
+    hook 全体の exit code には影響しない。
+
+    consumer が `uv tool install` 経路で tidd_tools を導入した場合、`.venv` には
+    tidd_tools が入らないため `.venv/bin/python -m tidd_tools health-check` は
+    「No module named tidd_tools」で失敗し続ける。この場合は警告を出さず、
+    PATH 上の `tidd` 実行ファイルへフォールバックする（Issue #2211）。
+    """
+    if not is_hook_enabled("session-start-health-check"):
+        return
+
+    root = _git("rev-parse", "--show-toplevel")
+    if not root:
+        return
+
+    root_path = Path(root)
+    # venv python の探索（Linux/macOS 優先、Windows フォールバック）
+    venv_python: Path | None = None
+    for candidate in (
+        root_path / ".venv" / "bin" / "python",
+        root_path / ".venv" / "Scripts" / "python.exe",
+    ):
+        if candidate.is_file():
+            venv_python = candidate
+            break
+
+    if venv_python is not None:
+        try:
+            result = subprocess.run(
+                [str(venv_python), "-m", "tidd_tools", "health-check"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=root,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return
+
+        if result.returncode == 0:
+            return
+
+        if _MODULE_NOT_FOUND_MARKER not in result.stderr:
+            _report_health_check_failure(result)
+            return
+        # .venv に tidd_tools がない consumer 環境 → tidd フォールバックへ進む
+
+    tidd_bin = shutil.which("tidd")
+    if tidd_bin is None:
+        return
+
+    try:
+        fallback_result = subprocess.run(
+            [tidd_bin, "health-check"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=root,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+    if fallback_result.returncode != 0:
+        _report_health_check_failure(fallback_result)
 
 
 def main() -> int:
@@ -355,6 +474,8 @@ def main() -> int:
         sys.stderr.write(f"session-start-cache: DB 書き込みエラー: {e}\n")
     finally:
         conn.close()
+
+    _run_health_check()
 
     return 0
 
