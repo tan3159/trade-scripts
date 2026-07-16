@@ -1,0 +1,7 @@
+# .secrets.baseline は detect-secrets の hashed_secret（SHA-1）を含むため
+# gitleaks の generic-api-key に偽陽性で引っかかる。実値は含まれない。
+[extend]
+useDefault = true
+
+[[allowlists]]
+paths = ['''\.secrets\.baseline$''']
