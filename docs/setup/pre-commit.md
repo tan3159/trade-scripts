@@ -62,7 +62,10 @@ tar xzf /tmp/gitleaks/gitleaks_*_linux_x64.tar.gz -C /tmp/gitleaks gitleaks
 /tmp/gitleaks/gitleaks git <repo> --no-banner --redact
 ```
 
-2026-07-17 実施: 5 commits scanned / **no leaks found**。
+`.gitleaks.toml`（リポジトリルート・自動読込）で `.secrets.baseline` を allowlist している。
+baseline 内の `hashed_secret`（SHA-1）が generic-api-key に偽陽性で検出されるため（実値は含まれない）。
+
+2026-07-17 実施: **no leaks found**。
 
 ## 動作確認（ダミー秘密情報）
 
