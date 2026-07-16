@@ -1,0 +1,39 @@
+# CI（pytest / ruff / mypy）— Issue #8
+#
+# public repo のためのセキュリティ方針:
+# - permissions はデフォルト read-only（contents: read のみ）
+# - pull_request_target は使わない（fork PR への secrets 露出防止）
+# - secrets を要する job を置かない
+# - action は full SHA で pin する
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/py/trade_scripts
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - name: Sync dev dependencies
+        run: uv sync --extra dev
+      - name: pytest
+        run: uv run pytest
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format
+        run: uv run ruff format --check .
+      - name: mypy
+        run: uv run mypy src tests
