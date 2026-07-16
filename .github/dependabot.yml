@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # uv は Dependabot 未対応のため pip エコシステムで運用する
+  # （pyproject.toml から dependencies を抽出可能）
+  - package-ecosystem: "pip"
+    directory: "/projects/py/trade_scripts"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
