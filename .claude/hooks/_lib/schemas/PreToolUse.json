@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PreToolUse hook payload",
+  "description": "Claude Code が PreToolUse hook に stdin で渡す JSON の schema。Issue #1292 で追加。",
+  "type": "object",
+  "required": ["tool_name", "tool_input"],
+  "properties": {
+    "tool_name": {
+      "type": "string",
+      "description": "呼び出そうとしている tool 名（Bash / Edit / Write / Read など）"
+    },
+    "tool_input": {
+      "type": "object",
+      "description": "tool の入力パラメータ辞書"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "セッション識別子（optional）"
+    },
+    "transcript_path": {
+      "type": "string",
+      "description": "会話ログのパス（optional）"
+    }
+  }
+}

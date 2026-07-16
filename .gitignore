@@ -1,0 +1,36 @@
+# 機密情報（絶対にコミットしない）
+.envrc
+*.pem
+*.key
+
+# ローカル環境固有
+cache/
+bin/
+.claude/settings.local.json
+.claude/ai-reviewer
+.claude/scheduled_tasks.lock
+.direnv/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# uv
+uv.lock
+
+# Node.js
+node_modules/
+
+# coverage
+.coverage
+.coverage.*
+*.coverage
+
+# ai-review バックエンドログ（誤って CWD に出力された場合の保険）
+codex-review-*.log
+agy-review-*.log

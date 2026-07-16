@@ -1,0 +1,137 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/.envrc)",
+      "Read(**/private-key.pem)",
+      "Read(**/credentials.json)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Write(**/.envrc)",
+      "Edit(**/.env)",
+      "Edit(**/.env.*)",
+      "Edit(**/.envrc)",
+      "Bash(git push* --force)",
+      "Bash(git push* -f *)",
+      "Bash(git push* -f)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D*)",
+      "Bash(rm -rf*)",
+      "Bash(sudo rm*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-issue.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-dangerous-git.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-issue.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-main-sync.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-claude-p.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-hardcoded-repo.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-red-first.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-merge-ci-status.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/protect-tests.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-shell-files.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-anthropic-import.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-parents-n.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-skill.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/label-pr.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/detect-rule-bloat.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/analyze-loop-on-stop.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/notify-copier-staleness.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

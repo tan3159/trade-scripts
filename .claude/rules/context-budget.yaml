@@ -1,0 +1,9 @@
+# コンテキスト予算閾値（Issue #1978 最終固定値・親 #1872）
+# est_tokens = 非ASCII文字数 + ASCII文字数/4（保守的方式・決定的）
+# #1978 で 2 ファイル圧縮完了。warn 7500/1000・hard 8000/1100 で最終固定。
+# 更新手順: docs/reference/context-budget.md / 決定記録: docs/decisions/2026-07-10-context-token-budget.md
+total_warn: 7500
+file_warn: 1000
+# HARD 閾値（tidd context-budget --check / test-plan PR gate が exit 1 でブロック）
+total_hard: 8000
+file_hard: 1100

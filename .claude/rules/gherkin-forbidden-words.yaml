@@ -1,0 +1,69 @@
+# Gherkin Then 句禁止語辞書（Issue #1284）
+#
+# feat/fix 系 Issue の `## 振る舞い` セクションの各 Scenario の Then 句が
+# 「主観的・検証不能な曖昧表現」を含むかを判定する禁止語 regex 定義。
+#
+# validate-issue.py hook と ai_review の prompts.py・issue_quality_check.py の
+# fallback STRICT モードから読み込まれる。
+#
+# 追加方法:
+# 1. 新しい禁止語を identifier + regex + description で追加
+# 2. `.claude/hooks/validate-issue.py` は自動的に YAML を読み込む
+# 3. `docs/reference/gherkin-quality.md` の一覧を更新
+#
+# regex は Python 3 の re.MULTILINE で評価される。
+
+forbidden_words:
+  - id: correct_behavior
+    regex: '(正しく動く|正しく動作する|正しく処理される)'
+    description: '「正しく」は主観的で観測不能。exit code や出力の具体値を書く'
+    example_bad: 'Then 正しく動く'
+    example_good: 'Then exit code 0 で終了する / stdout に "SUCCESS" が出力される'
+
+  - id: works_well
+    regex: '(うまくいく|問題なく動く|問題なく動作する)'
+    description: '「うまくいく」は主観的で観測不能'
+    example_bad: 'Then うまくいく'
+    example_good: 'Then ファイル /tmp/output.log が作成される'
+
+  - id: as_expected
+    regex: '(期待通り|想定通り|期待される結果|想定される結果)'
+    description: '「期待通り」は具体化されておらず観測点が不明'
+    example_bad: 'Then 期待通りの結果が返る'
+    example_good: 'Then stdout に "verdict: APPROVE" を含む'
+
+  - id: no_error
+    regex: 'エラー(が出ない|が発生しない|なし)'
+    description: '「エラーが出ない」は観測範囲が広すぎる。どのエラーかを具体化する'
+    example_bad: 'Then エラーが出ない'
+    example_good: 'Then exit code 0 かつ stderr が空である'
+
+  - id: success_vague
+    regex: '(成功する)($|[^し(するかどうか)])'
+    description: '「成功する」は観測方法が不明。exit code や具体的な副作用を書く'
+    example_bad: 'Then バリデーションが成功する'
+    example_good: 'Then exit code 0 で終了する'
+
+  - id: subjective_natural
+    regex: '(自然に動く|自然に動作する|直感的に動く)'
+    description: '主観的で観測不能'
+    example_bad: 'Then 自然に動く'
+    example_good: 'Then コマンド 3 個目の出力が "OK" になる'
+
+  - id: user_satisfaction
+    regex: 'ユーザーが(満足|喜ぶ|楽になる)'
+    description: '主観的で観測不能。UI 変化やレスポンスの具体値を書く'
+    example_bad: 'Then ユーザーが満足する'
+    example_good: 'Then レスポンスタイムが 500ms 以下になる'
+
+  - id: no_problem
+    regex: '(大丈夫|問題ない|OK)($|[^A-Za-z])'
+    description: '主観的で観測不能'
+    example_bad: 'Then 問題ない'
+    example_good: 'Then HTTP 200 が返る'
+
+  - id: works_correctly_vague
+    regex: '正常(に動く|に動作する|に処理される)'
+    description: '「正常に」は観測点が不明。何を確認すれば「正常」かを書く'
+    example_bad: 'Then 正常に処理される'
+    example_good: 'Then テーブル users に 1 行 insert される'

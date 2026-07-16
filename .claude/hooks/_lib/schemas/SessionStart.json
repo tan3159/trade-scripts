@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionStart hook payload",
+  "description": "Claude Code が SessionStart hook に stdin で渡す JSON の schema。Issue #1292 で追加。",
+  "type": "object",
+  "properties": {
+    "session_id": {"type": "string"},
+    "transcript_path": {"type": "string"},
+    "cwd": {
+      "type": "string",
+      "description": "セッション開始時の作業ディレクトリ"
+    }
+  }
+}

@@ -1,0 +1,66 @@
+# .envrc.example — direnv 用の環境変数設定テンプレート
+#
+# 使い方:
+#   cp .envrc.example .envrc
+#   direnv allow
+#
+# ⚠️  .envrc は .gitignore 済みです。実際のトークン・API キーを書いても
+#     コミットされませんが、画面共有・ログ・AI エージェントへの貼り付けには
+#     注意してください（CLAUDE.md セキュリティ原則参照）。
+# ⚠️  このファイル（.envrc.example）には実際のトークン・API キーを書かないでください。
+#     プレースホルダのみを記載します。
+
+# 通知メールアドレス（/publish skill 等で使用）
+export NOTIFY_EMAIL="tan3159@gmail.com"
+
+# ─────────────────────────────────────────────────────────────
+# 方式 A: 直書き（シンプルに始めたい場合）
+#
+# 実際のトークン・API キーを直接 export する。
+# セッションを開くたびに direnv が自動 export する。
+# ─────────────────────────────────────────────────────────────
+
+# GitHub App（ai-review 用）
+# export APP_ID="123456"
+# export INSTALLATION_ID="78901234"
+# export GH_TOKEN="github_pat_xxx..."
+
+# GitHub App 秘密鍵（content か path のどちらか一方）
+# export PRIVATE_KEY_CONTENT="-----BEGIN RSA PRIVATE KEY-----
+# MIIEowIBAAK...（実際の秘密鍵の内容）
+# -----END RSA PRIVATE KEY-----"
+# または
+# export PRIVATE_KEY_PATH="$HOME/.config/ai-reviewer/private-key.pem"
+
+# Secrets Backend（方式 A では "env" のまま）
+# export SECRETS_BACKEND="env"
+
+# agy 用（Google Cloud Application Credentials）
+# export GOOGLE_APPLICATION_CREDENTIALS_JSON='{"type":"service_account",...}'
+
+# codex 用（OpenAI）
+# export OPENAI_API_KEY="sk-proj-xxx..."
+
+# Anthropic（直接 API 呼び出しが必要な場合）
+# export ANTHROPIC_API_KEY="sk-ant-xxx..."
+
+# CircleCI
+# export CIRCLECI_TOKEN="token_xxx..."
+
+# ─────────────────────────────────────────────────────────────
+# 方式 B: Bitwarden 参照（トークンを直書きしたくない場合）
+#
+# SECRETS_BACKEND=bw にすることで、環境変数が未設定のとき
+# shared/secrets.py の get_secret() が自動的に
+# `bw get password "<アイテム名>"` を呼んでフォールバックする（Issue #1630）。
+# bw CLI のセッションが有効である必要があります（tidd bw-session-check）。
+# ─────────────────────────────────────────────────────────────
+
+# export SECRETS_BACKEND="bw"
+#
+# 上記を設定するだけで get_secret() が Bitwarden から自動取得します。
+# Bitwarden のアイテム名は docs/setup/ai-review-credentials.md を参照。
+#
+# 例: APP_ID を Bitwarden から取得したい場合
+#   → SECRETS_BACKEND=bw かつ APP_ID 環境変数を未設定のままにしておく
+#   → get_secret("APP_ID", bw_item="GitHub App ID") が bw から取得する

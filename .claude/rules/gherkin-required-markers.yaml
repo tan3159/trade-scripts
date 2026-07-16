@@ -1,0 +1,97 @@
+# Gherkin 必須観測要素の positive list（Issue #1305）
+#
+# feat/fix 系 Issue の `## 振る舞い` セクションの各 Scenario の Then 句が
+# 「観測可能な状態」を示しているかを判定する regex 定義。
+#
+# validate-issue.py hook は以下のいずれかの regex にマッチする文言が Then 句
+# （`Then ...` および直後の `And ...` 継続行）に含まれていれば通す。
+# いずれもマッチしなければ「観測要素が不足しています」と判定して exit 2 でブロックする。
+#
+# 追加方法:
+# 1. 新しい観測パターンを identifier + regex + description で追加
+# 2. `.claude/hooks/validate-issue.py` は自動的に YAML を読み込む
+# 3. `docs/reference/gherkin-required-markers.md` を更新
+# 4. `.claude/rules/issue-creation.md` の例示リストを更新
+#
+# regex は Python 3 の re.MULTILINE で評価される。
+
+markers:
+  # ── exit code / return code ──
+  - id: exit_code
+    regex: '(exit\s?code|exit\s+\d+|return(?:\s?code)?\s+\d+|終了コード|終了する)'
+    description: 'exit code / 終了コード / 終了する'
+    example: 'Then exit code 0 で終了する / hook が exit 2 で終了する'
+
+  # ── stderr 出力 ──
+  - id: stderr_output
+    regex: '(stderr|標準エラー|エラー出力).*("|「).+("|」)'
+    description: 'stderr に具体的な文字列が出力される'
+    example: 'Then stderr に "Blocked: ..." を含むメッセージが出力される'
+
+  # ── stdout 出力 ──
+  - id: stdout_output
+    regex: '(stdout|標準出力).*("|「).+("|」)'
+    description: 'stdout に具体的な文字列が出力される'
+    example: 'Then stdout に JSON `{...}` が出力される'
+
+  # ── ファイル状態 ──
+  - id: file_state
+    regex: '(ファイル|file).*(存在|作成|書き込|上書き|削除|変更|反映)'
+    description: 'ファイルの存在・変更が観測される'
+    example: 'Then ~/.cache/foo/bar.json が作成される'
+
+  # ── ファイル内容 ──
+  - id: file_content
+    regex: '(に|へ).*("|「).+("|」).*(書き込|入る|含|保存|更新)'
+    description: 'ファイル / 変数に具体的な値が書き込まれる'
+    example: 'Then ~/.cache/verdict に "APPROVE" が書き込まれる'
+
+  # ── GitHub 状態 ──
+  - id: github_state
+    regex: '(GitHub|Issue|PR|コメント|ラベル|レビュー).*(投稿|作成|付与|マージ|クローズ|オープン|追加)'
+    description: 'GitHub 上の状態変化（コメント投稿・ラベル付与など）'
+    example: 'Then Issue に "## Issue品質チェック結果" コメントが投稿される'
+
+  # ── 数値・カウント ──
+  - id: numeric_state
+    regex: '(該当|一致).*(\d+\s*(件|個|行))'
+    description: '検出件数・件数が具体的な数値で観測される'
+    example: 'Then 該当行が 0 件になる'
+
+  # ── コマンドの直接実行結果 ──
+  - id: command_result
+    regex: '(コマンド|command|実行結果).*(で|の|を)(確認|検証|判定|返す|得る)'
+    description: 'コマンド実行結果を明示的に検証する'
+    example: 'Then `gh pr view <N> --json labels` で確認できる'
+
+  # ── 環境変数・設定値 ──
+  - id: env_var
+    regex: '(環境変数|env|export)\s*\w+'
+    description: '環境変数が観測される'
+    example: 'Then 環境変数 CLAUDECODE=1 が確認できる'
+
+  # ── HTTP / API レスポンス ──
+  - id: http_response
+    regex: '(HTTP|API|status\s*code)\s*\d{3}'
+    description: 'HTTP ステータスコードで観測される'
+    example: 'Then HTTP 200 が返る'
+
+  # ── サブプロセス完了状態 ──
+  - id: subprocess_state
+    regex: '(subprocess|プロセス|process).*(SIGTERM|SIGKILL|終了|完了|失敗|開始)'
+    description: 'サブプロセスの状態変化が観測される'
+    example: 'Then agy subprocess が SIGTERM で終了する'
+
+# 除外パターン（この文言が Then 句に含まれていても観測要素扱いしない）
+# 例: 「正しく動く」「うまくいく」「期待通り」等の主観表現
+subjective_denylist:
+  - '正しく動く'
+  - 'うまくいく'
+  - '期待通り'
+  - '想定通り'
+  - '自然に動く'
+  - '普通に動く'
+  - 'エラーが出ない'
+  - 'ユーザーが満足'
+  - '大丈夫'
+  - '問題ない'

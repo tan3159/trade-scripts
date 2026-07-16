@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Stop hook payload",
+  "description": "Claude Code が Stop hook に stdin で渡す JSON の schema。Issue #1292 で追加。",
+  "type": "object",
+  "properties": {
+    "session_id": {"type": "string"},
+    "transcript_path": {"type": "string"},
+    "stop_hook_active": {
+      "type": "boolean",
+      "description": "Stop hook が現在有効かどうか"
+    }
+  }
+}

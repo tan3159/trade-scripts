@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UserPromptSubmit hook payload",
+  "description": "Claude Code が UserPromptSubmit hook に stdin で渡す JSON の schema。Issue #1292 で追加。",
+  "type": "object",
+  "required": ["prompt"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "ユーザーがサブミットしたプロンプト本文"
+    },
+    "session_id": {"type": "string"},
+    "transcript_path": {"type": "string"}
+  }
+}

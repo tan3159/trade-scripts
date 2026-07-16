@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PostToolUse hook payload",
+  "description": "Claude Code が PostToolUse hook に stdin で渡す JSON の schema。Issue #1292 で追加。",
+  "type": "object",
+  "required": ["tool_name", "tool_input"],
+  "properties": {
+    "tool_name": {"type": "string"},
+    "tool_input": {"type": "object"},
+    "tool_response": {
+      "type": "object",
+      "description": "tool 実行結果（output / error など）"
+    },
+    "session_id": {"type": "string"},
+    "transcript_path": {"type": "string"}
+  }
+}

@@ -1,0 +1,40 @@
+# rules/*.md 肥大化パターン検出キーワード辞書（Issue #1772）
+#
+# detect-rule-bloat.py PostToolUse hook がこの YAML を読み込んで
+# .claude/rules/*.md の「敗戦記録・research 結論・重複表」パターンを検出する。
+#
+# エントリ構造:
+#   id: 一意な識別子
+#   category: 警告カテゴリ名
+#   regex: Python 3 の re 互換の正規表現（re.IGNORECASE で適用）
+#   reason: なぜ rules/*.md に書くべきでないか（1行）
+#   recommend: 退避先の推奨（例: docs/decisions/）
+
+keywords:
+  # カテゴリ 1: 敗戦記録・見送り記録
+  - id: rejected_decision
+    category: 敗戦記録・見送り記録
+    regex: '見送り|不採用|棄却|廃案|検討の結果.*しない|採用しなかった|採用しない方針|NG とした|NG にした'
+    reason: 'rule に「不採用にした理由」を書くと肥大化する。docs/decisions/ に退避させるべき'
+    recommend: 'docs/decisions/YYYY-MM-DD-<slug>.md に記録する'
+
+  # カテゴリ 2: research 結論・PoC 結果
+  - id: research_conclusion
+    category: research 結論・PoC 結果
+    regex: 'PoC 結果|PoC で確認|research 結論|調査結果|実測データ|測定結果|実験結果|before\/after|計測した結果'
+    reason: 'research 結論・実測データは rule ではなく docs/research/ に置くべき'
+    recommend: 'docs/research/<slug>.md に記録し、rule からは 1 行 URL で参照する'
+
+  # カテゴリ 3: 廃止・レガシー記録
+  - id: deprecated_record
+    category: 廃止・レガシー記録
+    regex: '廃止済み|廃止した|旧実装|旧方式|旧仕様|migrate 前|撤去済み|deprecated|旧来.*削除|Issue #\d+.*で.*廃止'
+    reason: 'rule に廃止経緯を書くと肥大化する。CHANGELOG や docs/decisions/ に退避させるべき'
+    recommend: 'docs/decisions/ または docs/research/ に記録し、rule から削除する'
+
+  # カテゴリ 4: Issue 番号付きの経緯・背景説明
+  - id: issue_history
+    category: 経緯・背景説明（Issue 番号付き）
+    regex: 'Issue #\d+.*に.*より|Issue #\d+.*で.*確認|Issue #\d+.*で.*判明|Issue #\d+.*の.*結果|Issue #\d+ research'
+    reason: 'rule に「なぜそうなったか」の経緯を詳述すると肥大化する。重要なら docs/decisions/ に記録し 1 行参照にする'
+    recommend: 'docs/decisions/ に記録し、rule からは URL 参照のみにする'

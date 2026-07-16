@@ -1,0 +1,185 @@
+# review-prompt.yaml — AI コードレビュープロンプト辞書（Issue #1648）
+#
+# `projects/py/tidd_tools/src/tidd_tools/ai_review/review_prompt_loader.py` が
+# このファイルを読み込み、`render_common_header()` でプロンプトを組み立てる。
+#
+# セクション構成:
+#   severity_rules      — Cloudflare 型重大度分類の定義・evidence 要件
+#   attempt_cycle_rules — attempt-cycle reduction ルール（Issue #1503）
+#   security_checklist  — セキュリティ観点チェックリスト（OWASP / LLM / シェル固有）
+#
+# 編集方法:
+# 1. セクション内のキー・値を YAML で追加・編集する
+# 2. `pytest -m target_review_prompt_schema` で schema 検証を実行する
+# 3. 必要に応じて `docs/reference/review-prompt-dictionary.md` を更新する
+#
+# 設計背景: `.claude/rules/gherkin-forbidden-words.yaml` 等と同じ辞書機構。
+# Python コードを変更せず YAML 編集だけで観点を更新できる。
+
+severity_rules:
+  # Cloudflare 型 severity 定義（behavior-based / evidence-based）
+  # 参照: https://blog.cloudflare.com/the-cloudflare-bug-bounty-program/
+  definitions:
+    CRITICAL: >
+      Will cause an outage, data loss, or is exploitable in production.
+      e.g. 本番サービスのダウン・データ消失・認証バイパスを直接引き起こす欠陥。
+    HIGH: >
+      Causes a wrong observable outcome under normal production usage —
+      violates the intent of the change or the acceptance criteria.
+      受け入れ条件（## 振る舞い の Then 句）を満たしていない、または
+      既存テストを壊すバグが含まれる場合に使用する。
+    MEDIUM: >
+      Maintainability / readability / non-blocking improvement.
+      今すぐ直さなくてもマージして問題ない改善提案。Ship-safe。
+    LOW: >
+      Nit / style / suggestion.
+      タイポ・スタイル・定性的な提案のみ。
+
+  # レビュー前の chain-of-thought（CoT）手順
+  chain_of_thought:
+    steps:
+      - "diff が生成する実際の runtime behavior を特定する"
+      - >
+        「この behavior が現在 outage / data loss / security breach /
+        wrong observable outcome を引き起こすか」を自問する
+      - >
+        Yes なら diff の file:line を引用してから severity を選ぶ。
+        No（仮想的・防御的な懸念のみ）なら MEDIUM または LOW を選ぶ
+
+  # evidence 要件 — false positive をブロックする
+  evidence_requirements:
+    high_critical:
+      - >
+        CRITICAL / HIGH の指摘には必ず diff の file:line を引用する。
+        引用できない場合は MEDIUM に降格するか指摘を削除する。
+      - >
+        「理論上失敗しうる（could theoretically fail if X）」は MEDIUM または LOW。
+        現実の runtime path で実際に起きることを示せなければ HIGH にしない。
+      - >
+        ドキュメントと実装の乖離を HIGH にする前に、grep でファイルを確認する。
+        アンカー名・行番号が異なるだけで実装が存在する場合は LOW 以下。
+
+  verdict_rules:
+    approve: "CRITICAL / HIGH 指摘が0件のとき APPROVE を返す"
+    request_changes: "CRITICAL または HIGH が1件以上あるとき REQUEST_CHANGES を返す"
+    medium_is_advisory: >
+      MEDIUM 指摘は advisory（参考情報）として APPROVE とともに返す。
+      修正ループを起こさない。
+    deferred_tag: >
+      このPRのスコープ外・将来対応の項目には [DEFERRED] タグを使う。
+      [DEFERRED] は APPROVE として扱う。
+
+attempt_cycle_rules:
+  # これらのカテゴリは MEDIUM または LOW のみ。HIGH / CRITICAL は禁止。
+  # 正当な PR がループして詰まる原因を排除するため（Issue #1503）。
+  downgrade_to_medium:
+    - id: gherkin_cosmetic
+      description: >
+        Gherkin の追加シナリオ要求・「Then 句が網羅的でない」などの指摘。
+        PR に正常系 Scenario + 観測可能な Then 句が1つでもあれば MEDIUM。
+      examples:
+        - "もっとエラーケースの Scenario を書くべき"
+        - "Then 句が不十分"
+        - "異常系 Scenario を追加してください"
+
+    - id: pain_format_nitpick
+      description: >
+        ## 背景 セクションの文言・表現・並び順への指摘。
+        Pain が問題を特定できていれば MEDIUM。
+      examples:
+        - "Pain の書き方が規約と異なる"
+        - "背景セクションの表現を改善してください"
+
+    - id: doc_drift_unverified
+      description: >
+        「ドキュメントが実装と乖離している」という指摘は、grep 確認前は HIGH 禁止。
+        アンカー名・行番号差異のみなら LOW。
+      examples:
+        - "docs/reference に書かれた X が見つからない"
+        - "CLAUDE.md の記述と実装が食い違っている"
+
+    - id: cosmetic_typo
+      description: >
+        タイポ・ワーディング・表現に関する指摘で runtime 影響がないもの。
+      examples:
+        - "typo: 'occured' → 'occurred'"
+        - "表現を clearer に"
+        - "より分かりやすい変数名にしてください"
+
+    - id: speculative_exception
+      description: >
+        「この関数が OSError を raise するかもしれない」など
+        現実の runtime path を示せない例外ハンドリング指摘。
+      examples:
+        - "ここで IOError をキャッチしていない"
+        - "ネットワーク障害が起きたら困る"
+
+    - id: anchor_link_mismatch
+      description: >
+        Markdown アンカーリンク（# section-name）の
+        自動生成差異（ハイフン・大文字小文字）による不一致。
+      examples:
+        - "'# section-name' が '# sectionname' になっている"
+
+security_checklist:
+  # セキュリティ観点チェックリスト
+  # 各 item は id / description / severity_hint / examples で構成
+  items:
+    - id: command_injection
+      description: >
+        シェルコマンドへのユーザー入力の直接埋め込み（shell=True / os.system / subprocess への未サニタイズ入力）。
+      severity_hint: CRITICAL
+      examples:
+        - "subprocess.run(f'git {user_input}', shell=True)"
+        - "os.system('git commit -m ' + user_message)"
+
+    - id: prompt_injection
+      description: >
+        LLM プロンプトへの非信頼入力（PR 本文・Issue 本文・外部 API レスポンス）の
+        サニタイズなし埋め込み。攻撃者が LLM に意図しない命令を実行させる可能性。
+      severity_hint: HIGH
+      examples:
+        - "prompt = f'レビューしてください: {pr_body}' # pr_body にインジェクション文字列が含まれる可能性"
+
+    - id: credential_leakage
+      description: >
+        APIキー・トークン・パスワード・秘密鍵のログ出力・コード内ハードコード・
+        Issue/PR 本文への記録。
+      severity_hint: CRITICAL
+      examples:
+        - "print(f'token: {api_key}')"
+        - "logger.debug(f'GH_TOKEN={os.environ[\"GH_TOKEN\"]}')"
+
+    - id: path_traversal
+      description: >
+        ユーザー入力を含むファイルパスのサニタイズなし使用。
+        `../` を含む相対パスで意図しないファイルへのアクセスが可能になるリスク。
+      severity_hint: HIGH
+      examples:
+        - "open(user_provided_path)"
+        - "Path(base_dir) / user_input  # user_input が '../' を含む可能性"
+
+    - id: input_validation
+      description: >
+        外部入力（CLI 引数・環境変数・GitHub API レスポンス・ファイル内容）の
+        型・形式・範囲検証の欠如。
+      severity_hint: MEDIUM
+      examples:
+        - "issue_num = int(os.environ['ISSUE'])  # 未検証"
+
+    - id: missing_authz
+      description: >
+        認証（authentication）はあるが認可（authorization）チェックが欠落。
+        トークン所持者が意図しないリソースにアクセスできる設計。
+      severity_hint: HIGH
+      examples:
+        - "gh issue edit --repo arbitrary/repo  # リポジトリ検証なし"
+
+    - id: insecure_defaults
+      description: >
+        安全でないデフォルト値（check=False の subprocess・SSL 検証無効化・
+        umask 0022 以上のファイル権限など）の使用。
+      severity_hint: MEDIUM
+      examples:
+        - "subprocess.run(cmd, check=False)  # エラーを無視"
+        - "requests.get(url, verify=False)"

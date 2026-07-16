@@ -1,0 +1,69 @@
+# [AI確認] 誤用検出キーワード辞書（Issue #1310）
+#
+# detect-ai-confirm-misuse.py hook がこの YAML を読み込んで
+# PR ボディの [AI確認] 項目に禁止キーワードが含まれていないか検査する。
+#
+# エントリ構造:
+#   id: 一意な識別子
+#   category: カタログカテゴリ名（manual-check-catalog.md の # N. と対応）
+#   regex: Python 3 の re 互換の正規表現（re.IGNORECASE で適用）
+#   reason: なぜ AI で観測不能か（1行）
+#   example_bad: [AI確認] での誤った使用例
+#   example_good: [手動] への書き換え例
+
+keywords:
+  # カテゴリ 1: ブラウザ UI 目視確認
+  - id: browser_ui
+    category: ブラウザ UI 目視確認
+    regex: 'ブラウザ|画面表示|画面で確認|UI確認|スクリーンショット|目視確認|見た目|デザイン確認|レイアウト確認'
+    reason: 'ブラウザのレンダリング結果は GUI を持つ人間のみ観測できる'
+    example_bad: '- [ ] [AI確認] ブラウザで表示を確認する'
+    example_good: '- [ ] [手動] ブラウザで表示を確認する'
+
+  # カテゴリ 2: OS ハード依存動作
+  - id: os_hardware
+    category: OS ハード依存動作
+    regex: 'Windows.*実機|macOS.*実機|iOS.*実機|Android.*実機|WSL.*実機|実機確認|ハードウェア依存|GPU'
+    reason: 'OS 固有の挙動やハードウェア依存動作は実環境でのみ正確に確認できる'
+    example_bad: '- [ ] [AI確認] Windows の実機で動作を確認する'
+    example_good: '- [ ] [手動] Windows の実機で動作を確認する'
+
+  # カテゴリ 3: 機密情報取り扱い
+  - id: secret_credentials
+    category: 機密情報取り扱い
+    regex: 'APIキー.*確認|API key.*確認|トークン.*取得|token.*取得|パスワード.*確認|秘密鍵.*確認|認証情報.*確認|credential.*確認'
+    reason: '機密情報の確認を AI に委ねるとセキュリティリスクになる'
+    example_bad: '- [ ] [AI確認] Bitwarden で API キーが取得できることを確認する'
+    example_good: '- [ ] [手動] Bitwarden で API キーが取得できることを確認する'
+
+  # カテゴリ 4: 法令・契約判断
+  - id: legal_compliance
+    category: 法令・契約判断
+    regex: '法令|規約.*確認|契約.*確認|ライセンス.*確認|コンプライアンス|GDPR|個人情報.*確認|著作権.*確認'
+    reason: '法的判断は法務担当者・顧問弁護士の確認が必要'
+    example_bad: '- [ ] [AI確認] ライセンス条項が互換であることを確認する'
+    example_good: '- [ ] [手動] ライセンス条項が互換であることを法務に確認する'
+
+  # カテゴリ 5: 外部ステークホルダー確認
+  - id: stakeholder
+    category: 外部ステークホルダー確認
+    regex: 'ステークホルダー.*確認|顧客.*確認|クライアント.*確認|プロダクトオーナー.*承認|マネージャー.*確認|承認を得'
+    reason: '外部ステークホルダーとの合意・承認プロセスは人間の意思決定を要する'
+    example_bad: '- [ ] [AI確認] プロダクトオーナーの承認を得る'
+    example_good: '- [ ] [手動] プロダクトオーナーの承認を得る'
+
+  # カテゴリ 6: 不可逆操作
+  - id: irreversible
+    category: 不可逆操作
+    regex: '本番.*削除|production.*削除|プロダクション.*削除|本番.*drop|本番.*reset|本番.*リセット|バックアップ.*確認.*削除|不可逆'
+    reason: '本番データの削除・リセット等の不可逆操作は人間が意図を確認して実行する必要がある'
+    example_bad: '- [ ] [AI確認] 本番データベースへのマイグレーションを確認する'
+    example_good: '- [ ] [手動] 本番データベースへのマイグレーションを確認してから実行する'
+
+  # カテゴリ 7: 主観的・感覚的判断
+  - id: subjective
+    category: 主観的・感覚的判断
+    regex: 'わかりやすい.*確認|直感的.*確認|使いやすい.*確認|UX.*確認|ユーザー体験.*確認|フィーリング|読みやすさ.*確認'
+    reason: 'ユーザビリティ・デザイン品質等の主観的評価は人間のユーザー視点でのみ判断できる'
+    example_bad: '- [ ] [AI確認] ドキュメントがわかりやすいことを確認する'
+    example_good: '- [ ] [手動] ドキュメントがわかりやすいことを確認する'

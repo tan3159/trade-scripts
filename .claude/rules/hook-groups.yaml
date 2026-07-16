@@ -1,0 +1,73 @@
+# hook グループ定義
+#
+# tidd configure の対話ウィザードで使用するグループ分類。
+# 各 hook がどのグループに属するかを一元管理する。
+#
+# 形式:
+#   groups:
+#     - name: <グループ名>
+#       label: <日本語ラベル（ウィザード表示用）>
+#       description: <グループの説明>
+#       hooks:
+#         - <hook 名（拡張子なし）>
+#
+# グループの順序 = ウィザードの質問順序:
+#   1. TiDD 強制系（require-issue 等）
+#   2. テスト強制系（protect-tests 等）
+#   3. 安全ガード系（ban-shell-files 等）← 受け入れ基準の3番目の質問
+#   4. 品質ゲート系（validate-issue 等）
+#   5. 自動化系（label-pr 等）
+#
+# デフォルト: すべての hook は有効（~/.config/tidd_tools/hooks-config.json でオーバーライド可）
+# 参照: .claude/hooks/_lib/hook_io.py の is_hook_enabled()
+
+groups:
+  - name: tidd-enforcement
+    label: TiDD 強制系
+    description: "NO TICKET NO WORK・コミット前 Issue 紐付けを強制する"
+    hooks:
+      - require-issue
+      - require-main-sync
+
+  - name: test-enforcement
+    label: テスト強制系
+    description: "TDD/BDD ワークフロー・テスト保護・RED-GREEN 順序を強制する"
+    hooks:
+      - protect-tests
+      - require-red-first
+
+  - name: safety-guard
+    label: 安全ガード系（シェルファイル禁止・不正インポート防止）
+    description: "危険な操作・禁止パターン・セキュリティを防護する"
+    hooks:
+      - block-dangerous-git
+      - ban-shell-files
+      - ban-anthropic-import
+      - ban-claude-p
+      - ban-hardcoded-repo
+      - ban-parents-n
+
+  - name: quality-gate
+    label: 品質ゲート系
+    description: "PR 品質・Issue 品質・テスト整合性を検証する"
+    hooks:
+      - validate-issue
+      - require-yaru-consistency
+      - detect-ai-confirm-misuse
+
+  - name: automation
+    label: 自動化系
+    description: "PR ラベル付与・ruff フォーマット・セッション管理など自動実行フック"
+    hooks:
+      - label-pr
+      - auto-ruff-format
+      - session-start-cache
+      - on-stop
+      - analyze-loop-on-stop
+      - yaru-auto-tick
+
+  - name: observability
+    label: 計測系
+    description: "ai-review ステップ別 timing 計測など、パフォーマンス計測基盤（デフォルト off）"
+    hooks:
+      - ai-review-timing
