@@ -430,8 +430,8 @@ def _run_health_check() -> None:
         _report_health_check_failure(fallback_result)
 
 
-def main() -> int:
-    # hook 機能別 on/off（Issue #2167）
+def _run_cache() -> int:
+    """PR/Issue キャッシュ本体。機能キー ``session-start-cache`` で on/off する（Issue #2167）."""
     if not is_hook_enabled("session-start-cache"):
         return 0
 
@@ -475,9 +475,17 @@ def main() -> int:
     finally:
         conn.close()
 
+    return 0
+
+
+def main() -> int:
+    exit_code = _run_cache()
+
+    # Issue #2232: health check は session-start-health-check キーのみで gate する
+    # （session-start-cache が無効でも実行する）
     _run_health_check()
 
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":
