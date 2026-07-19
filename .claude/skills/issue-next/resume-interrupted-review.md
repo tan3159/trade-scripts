@@ -54,7 +54,7 @@ Claude Code セッション内での手順:
 git fetch origin
 git worktree add "../<repo>-issue-<N>-resume" "origin/${_head_ref}"
 cd "../<repo>-issue-<N>-resume"
-uv run --project projects/py/tidd_tools python -m tidd_tools ai-review "$_pr_num" 1
+tidd ai-review "$_pr_num" 1
 ```
 
 その後は STEP 5 の終了コード分岐（0/1/2/3/4）に従う。

@@ -1,6 +1,6 @@
 # review-prompt.yaml — AI コードレビュープロンプト辞書（Issue #1648）
 #
-# `projects/py/tidd_tools/src/tidd_tools/ai_review/review_prompt_loader.py` が
+# `tidd_tools.ai_review.review_prompt_loader`（インストール方法に依らないモジュールパス）が
 # このファイルを読み込み、`render_common_header()` でプロンプトを組み立てる。
 #
 # セクション構成:

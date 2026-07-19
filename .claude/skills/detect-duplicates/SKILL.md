@@ -39,11 +39,10 @@ gh issue list --state open --limit 500 \
 
 ```bash
 # Issue 数が多いときの batch 分割 + perf 記録（Issue #1466）
-uv run --project projects/py/tidd_tools \
-  python -m tidd_tools detect-duplicates-batch --batch-size 30 --dry-run
+tidd detect-duplicates-batch --batch-size 30 --dry-run
 ```
 
-`--dry-run` を付けると各 batch の issue 番号を stderr にログ出力するだけで実質処理をスキップする（perf 記録は常に行う）。skill 側の subagent 起動 loop は本 CLI の scope 外であり、SKILL.md 側で STEP 2 以降を batch ごとに繰り返す運用に切り替える（batch 分割ロジックの詳細は `projects/py/tidd_tools/src/tidd_tools/detect_duplicates_batch.py` を参照）。
+`--dry-run` を付けると各 batch の issue 番号を stderr にログ出力するだけで実質処理をスキップする（perf 記録は常に行う）。skill 側の subagent 起動 loop は本 CLI の scope 外であり、SKILL.md 側で STEP 2 以降を batch ごとに繰り返す運用に切り替える（batch 分割ロジックの詳細は `tidd_tools.detect_duplicates_batch` モジュールを参照）。
 
 **gh コマンド失敗時のエラーハンドリング:** exit code が非ゼロ（ネットワーク障害・認証切れ・quota
 超過等）の場合は skill 全体を停止する:

@@ -181,4 +181,4 @@ Issue は起票しない。
 - `.claude/rules/issue-creation.md` — Issue 品質・フォーマット規約
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
 - [docs/reference/create-issue-skill.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/create-issue-skill.md) — 詳細ドキュメント
-- `projects/py/tidd_tools/src/tidd_tools/shared/llm_issue_body.py` — 互換性スタブ（常に fallback）
+- `tidd_tools.shared.llm_issue_body` モジュール — 互換性スタブ（常に fallback）

@@ -34,12 +34,31 @@ EXCLUDE_BASENAMES: tuple[str, ...] = (
     # 上流 ai-dev-handbook の URL を default 値として保持する必要がある。
     # `TIDD_COPIER_UPSTREAM_URL` で override 可能（bootstrap.sh と同じ扱い）。
     "notify-copier-staleness.py",
+    # #2221: 配布物自身（templates/workflow/ 経由で consumer に配布される）が
+    # docstring / description 文言でリポジトリ固有文字列を含むため、consumer の
+    # 初回コミットが自己検出でブロックされる。以下の 3 ファイルは意図的に
+    # 「ai-dev-handbook」文字列を保持する（コメント外・非除外行のため
+    # コメント行スキップ (`is_excluded_line`) では吸収できない）。
+    "validate-skill.py",
+    "notify-template-sync.py",
+    "hardcoded-patterns.yaml",
 )
 
 # 除外パス（フルパス・相対パスのいずれにも対応するため部分一致で判定）
 EXCLUDE_PATH_FRAGMENTS: tuple[str, ...] = (
     "/tests/",
     "/docs/",
+    # #2221: __pycache__/ 配下のバイトコードは配布・commit 対象ではなく、
+    # 稀に文字列化した際に検出パターン (being-gaia-plan / ai-dev-handbook)
+    # を偶然含みうるため走査から除外する。
+    "__pycache__/",
+)
+
+# 除外拡張子（basename の末尾一致で判定）
+EXCLUDE_SUFFIXES: tuple[str, ...] = (
+    # #2221: Python バイトコード（.pyc / .pyo）は走査対象外。
+    ".pyc",
+    ".pyo",
 )
 
 
@@ -55,11 +74,21 @@ def is_excluded_basename(basename: str) -> bool:
 
 
 def is_excluded_path(path: str) -> bool:
-    """パス文字列が除外パスフラグメント（/tests/, /docs/）または .md を含むか判定する."""
+    """パス文字列が除外対象か判定する.
+
+    以下のいずれかを満たす場合に True を返す:
+    - `.md` で終わる（Markdown はドキュメント）
+    - `EXCLUDE_PATH_FRAGMENTS` のいずれかを部分文字列として含む
+      （`/tests/`, `/docs/`, `__pycache__/`）
+    - `EXCLUDE_SUFFIXES` のいずれかで終わる（`.pyc`, `.pyo`）
+    """
     if path.endswith(".md"):
         return True
     for fragment in EXCLUDE_PATH_FRAGMENTS:
         if fragment in path:
+            return True
+    for suffix in EXCLUDE_SUFFIXES:
+        if path.endswith(suffix):
             return True
     return False
 

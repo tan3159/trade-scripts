@@ -36,7 +36,7 @@ AI 技術の採用ライフサイクルを ThoughtWorks BYOR（Build Your Own Ra
 | **検討** | 注目しているが本格導入前 | 調査・PoC レベル。慎重に評価する |
 | **保留** | 見送り・現時点では採用しない | 使わない。理由を記録しておく |
 
-> Quadrant・Ring の定義は Issue #523 で確定。詳細は [`technology-radar-definitions.md`](./technology-radar-definitions.md) を参照。
+> Quadrant・Ring の定義は Issue #523 で確定。詳細は [`technology-radar-definitions.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/research/technology-radar-definitions.md) を参照。
 
 ---
 
@@ -108,12 +108,12 @@ AI 技術の採用ライフサイクルを ThoughtWorks BYOR（Build Your Own Ra
 | secret Gist | CSV 公開（非公開 URL） | GitHub Gist（URL 漏洩リスク回避のため secret） |
 | BYOR | レーダー描画 | `tan3159/build-your-own-radar`（GitHub Pages） |
 
-セットアップ手順は [`docs/setup/technology-radar.md`](../setup/technology-radar.md) を参照。
+セットアップ手順は [`docs/setup/technology-radar.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/technology-radar.md) を参照。
 
 ---
 
 ## 関連ドキュメント
 
-- [Technology Radar 定義](./technology-radar-definitions.md) — Quadrant・Ring の正式定義
-- [Technology Radar セットアップ手順](../setup/technology-radar.md) — 初回設定・スプレッドシート共有設定
+- [Technology Radar 定義](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/research/technology-radar-definitions.md) — Quadrant・Ring の正式定義
+- [Technology Radar セットアップ手順](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/technology-radar.md) — 初回設定・スプレッドシート共有設定
 - [ワークフロー規約](../../.claude/rules/workflow.md) — 「既存ソリューションを探す」ステップでレーダーを参照する

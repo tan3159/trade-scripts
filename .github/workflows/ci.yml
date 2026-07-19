@@ -1,8 +1,8 @@
-# CI（pytest / ruff / mypy）— Issue #8
+# CI（pytest / ruff / mypy）— Issue #2254
 #
 # public repo のためのセキュリティ方針:
 # - permissions はデフォルト read-only（contents: read のみ）
-# - pull_request_target は使わない（fork PR への secrets 露出防止）
+# - fork PR への secrets 露出リスクがあるイベントトリガーは使わない
 # - secrets を要する job を置かない
 # - action は full SHA で pin する
 name: ci
@@ -16,6 +16,7 @@ permissions:
   contents: read
 
 jobs:
+
   python:
     runs-on: ubuntu-latest
     defaults:

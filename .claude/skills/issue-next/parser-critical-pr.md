@@ -3,7 +3,7 @@
 `/issue-next` の STEP 5 詳細フロー。parser critical PR の場合のみ読む。
 
 **parser critical PR の定義:** PR の変更ファイルに以下のいずれかが含まれる:
-- `projects/py/tidd_tools/src/tidd_tools/ai_review/`（サブディレクトリ含む）
+- `tidd_tools/ai_review/`（サブディレクトリ含む）
 - `.claude/hooks/validate-issue.py`
 - `.claude/hooks/require-issue.py`
 

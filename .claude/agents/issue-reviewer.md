@@ -24,7 +24,7 @@ model: sonnet
   - **critical モジュール判定（Issue #1288・#1378）**: Issue 本文の `## 参照` セクションに
     以下 critical モジュールのパスが含まれる場合、`## 振る舞い` に境界値異常系 Scenario が
     最低 1 つ含まれているかを検査します。含まれていなければ `boundary_missing: true` を返します:
-    - `projects/py/tidd_tools/src/tidd_tools/ai_review/**`
+    - `tidd_tools/ai_review/**`
     - `.claude/hooks/validate-issue.py`
     - `.claude/hooks/require-issue.py`
 - **Anthropic SDK 直接呼び出しは禁止**: 本 subagent は Claude Code の Agent tool 経由で
@@ -74,7 +74,7 @@ JSON のみで応答してください:
 ### `boundary_missing` の判定手順（Issue #1288・#1378）
 
 1. Issue 本文の `## 参照` セクションを読む
-2. critical モジュールパス（`projects/py/tidd_tools/src/tidd_tools/ai_review/**`・
+2. critical モジュールパス（`tidd_tools/ai_review/**`・
    `.claude/hooks/validate-issue.py`・`.claude/hooks/require-issue.py`）のいずれかを含むか判定
 3. 含まない場合: `boundary_missing: false`、`boundary_reason: "critical モジュール参照なし（判定対象外）"`
 4. 含む場合: `## 振る舞い` の各 Scenario を検査し、境界値パターン（空文字・巨大入力・両方混在・

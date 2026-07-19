@@ -56,7 +56,7 @@ Agent(
 }
 ```
 
-- `boundary_missing` (Issue #1288・#1378): critical モジュール（`projects/py/tidd_tools/src/tidd_tools/ai_review/**`・
+- `boundary_missing` (Issue #1288・#1378): critical モジュール（`tidd_tools/ai_review/**`・
   `.claude/hooks/validate-issue.py`・`.claude/hooks/require-issue.py`）を `## 参照` に含む Issue で、
   境界値異常系 Scenario が `## 振る舞い` に含まれていない場合に `true`。`true` の場合 FAIL 扱い。
 
@@ -107,4 +107,4 @@ Claude Code の Agent tool 経由で subagent を起動することで、Claude 
 - `.claude/rules/issue-creation.md` — 判定基準
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
 - [docs/reference/issue-review-skill.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-review-skill.md) — 詳細ドキュメント
-- `projects/py/tidd_tools/src/tidd_tools/issue_quality_check.py` — 互換性スタブ（常に PASS）
+- `tidd_tools.issue_quality_check` モジュール — 互換性スタブ（常に PASS）

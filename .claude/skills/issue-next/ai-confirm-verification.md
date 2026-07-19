@@ -33,7 +33,7 @@
 **全 `[AI確認]` 項目を確認済みにできた場合:**
 `tidd ai-review --continue-with-verdict APPROVE` を再実行してマージを継続する:
 ```bash
-uv run --project projects/py/tidd_tools python -m tidd_tools ai-review --continue-with-verdict APPROVE <PR番号>
+tidd ai-review --continue-with-verdict APPROVE <PR番号>
 # 0 → 自動マージ完了（STEP 6 と同じ処理）
 # 4 → まだ [手動] 項目が残っている → 人間に委ねる
 ```

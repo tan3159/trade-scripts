@@ -1,19 +1,18 @@
+# Dependabot version updates 設定（copier 配布・#2255）
+#
+# primary_language に応じて依存関係エコシステムを切り替える
+# （Python -> uv・それ以外（TypeScript / GAS / Other）-> npm）。
+# ci_provider=github-actions のときは GitHub Actions のバージョン更新も追跡する。
 version: 2
 updates:
+
+  - package-ecosystem: "uv"
+    directory: "/projects/py/trade_scripts"
+    schedule:
+      interval: "weekly"
+
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-
-  # uv は Dependabot 未対応のため pip エコシステムで運用する
-  # （pyproject.toml から dependencies を抽出可能）
-  - package-ecosystem: "pip"
-    directory: "/projects/py/trade_scripts"
-    schedule:
-      interval: "weekly"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]

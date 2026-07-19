@@ -49,7 +49,7 @@ false positive を抑制した高品質なレビューを返します。
 - `security_checklist.items` — セキュリティ観点チェックリスト
 
 これらの内容を本 md にコピーせず、yaml を Read した結果に基づいて severity を決めること。
-非エンジニア向け解説は [`docs/reference/review-prompt-dictionary.md`](../../docs/reference/review-prompt-dictionary.md) を参照。
+非エンジニア向け解説は `docs/reference/review-prompt-dictionary.md`（本体リポジトリのみ・consumer 配布対象外）を参照。
 
 ## レビュー観点（一般 PR 特化）
 
@@ -80,7 +80,7 @@ false positive を抑制した高品質なレビューを返します。
 {
   "verdict": "APPROVE",
   "issues": [
-    {"severity": "HIGH", "file": "projects/py/tidd_tools/src/foo.py", "line": 42, "message": "空文字入力で AttributeError が発生し ai-review が exit 1 で終了する"}
+    {"severity": "HIGH", "file": "src/foo.py", "line": 42, "message": "空文字入力で AttributeError が発生し ai-review が exit 1 で終了する"}
   ],
   "rationale": "変更内容の要約と判定根拠（1-3 文）"
 }
@@ -100,9 +100,9 @@ false positive を抑制した高品質なレビューを返します。
 
 - 起動元: [`.claude/skills/issue-next/SKILL.md`](../skills/issue-next/SKILL.md) の exit code 3 フォールバック節（呼び出し元 workflow.md line 162-176）
 - 類似 subagent（別用途）: [`.claude/agents/ai-reviewer.md`](./ai-reviewer.md) — parser critical PR の multi-backend consensus 用（#1290）
-- severity / attempt-cycle / security 辞書（単一真実源）: [`.claude/rules/review-prompt.yaml`](../rules/review-prompt.yaml)（loader: [`projects/py/tidd_tools/src/tidd_tools/ai_review/review_prompt_loader.py`](../../projects/py/tidd_tools/src/tidd_tools/ai_review/review_prompt_loader.py)・辞書解説: [`docs/reference/review-prompt-dictionary.md`](../../docs/reference/review-prompt-dictionary.md)）
-- agy / codex 側での取り込み実装: [`projects/py/tidd_tools/src/tidd_tools/ai_review/prompts.py`](../../projects/py/tidd_tools/src/tidd_tools/ai_review/prompts.py) の `SKILL_HEADER`（同じ yaml を共有）
-- false positive 抑制の背景調査: [`docs/research/business-flow/ai-review-false-positive-research.md`](../../docs/research/business-flow/ai-review-false-positive-research.md)
-- 本 subagent の設計判断: [`docs/research/automation/claude-ai-reviewer-subagent.md`](../../docs/research/automation/claude-ai-reviewer-subagent.md)
+- severity / attempt-cycle / security 辞書（単一真実源）: [`.claude/rules/review-prompt.yaml`](../rules/review-prompt.yaml)（loader: `tidd_tools.ai_review.review_prompt_loader`（インストール方法に依らないモジュールパス）・辞書解説: `docs/reference/review-prompt-dictionary.md`（本体リポジトリのみ・consumer 配布対象外））
+- agy / codex 側での取り込み実装: `tidd_tools.ai_review.prompts` の `SKILL_HEADER`（同じ yaml を共有）
+- false positive 抑制の背景調査: `docs/research/business-flow/ai-review-false-positive-research.md`（本体リポジトリのみ・consumer 配布対象外）
+- 本 subagent の設計判断: `docs/research/automation/claude-ai-reviewer-subagent.md`（本体リポジトリのみ・consumer 配布対象外）
 - 実装制約: [`.claude/rules/implementation-constraints.md`](../rules/implementation-constraints.md)
 - Tool Calling 設計指針: [`.claude/rules/tool-calling.md`](../rules/tool-calling.md)

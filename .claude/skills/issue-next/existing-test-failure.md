@@ -40,7 +40,7 @@
 
      ```bash
      cd /path/to/<repo> && git fetch origin && git checkout --detach origin/main 2>/dev/null || true
-     uv run --project projects/py/tidd_tools python -m pytest <失敗テストパス>   # pytest の場合
+     tidd run-project-tests <PR番号>   # PR の変更ファイルに対応するプロジェクトの pytest/Jest を実行する
      # 実行後は元のブランチに戻す: git checkout main
      ```
 
