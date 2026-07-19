@@ -93,6 +93,6 @@ git push
 
 ## 依存関係
 
-- `tidd chezmoi-audit`（`projects/py/tidd_tools/src/tidd_tools/chezmoi_audit.py`）— 棚卸しの本体（旧 `scripts/chezmoi-audit.sh` を Issue #1057 で Python 化）
+- `tidd chezmoi-audit`（`tidd_tools.chezmoi_audit` モジュール）— 棚卸しの本体（旧 `scripts/chezmoi-audit.sh` を Issue #1057 で Python 化）
 - `.chezmoiignore` — 除外リスト（Issue #461 で整備）
 - `run_once_install_packages.sh` — apt パッケージ宣言ファイル

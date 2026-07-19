@@ -47,7 +47,9 @@ subagent は JSON `{"verdict": "APPROVE|REQUEST_CHANGES", "issues": [...], "rati
 
 ```bash
 # subagent の JSON を /tmp/agent-review-<PR番号>.json に保存済みとする
-uv run --project projects/py/tidd_tools python -c '
+# `tidd` と同じ venv の python を使う（インストール方法に依らず tidd_tools が import できる）
+# readlink -f は macOS 標準の readlink（BSD 版）が非対応のため python の realpath で解決する
+"$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$(command -v tidd)")")/python" -c '
 import json, sys
 from tidd_tools.ai_review.fallback_formatter import format_fallback_verdict
 payload = json.load(open(sys.argv[1]))
@@ -86,8 +88,8 @@ printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/ai-dev-handbook/ai-re
 
 `--continue-with-verdict` が内部で PR コメント投稿（`_post_comment_with_app_token()`）と reviewdog inline コメント投稿を行う。コメント投稿は `--continue-with-verdict` に一本化し、`--post-comment` を別途呼び出してはならない（二重投稿になる）。
 
-- APPROVE → `uv run --project projects/py/tidd_tools python -m tidd_tools ai-review --continue-with-verdict APPROVE <PR番号>` → STEP 6
-- REQUEST_CHANGES → `uv run --project projects/py/tidd_tools python -m tidd_tools ai-review --continue-with-verdict REQUEST_CHANGES <PR番号>` を実行してコメントを投稿する → 修正して push し、試行回数をインクリメントして再実行
+- APPROVE → `tidd ai-review --continue-with-verdict APPROVE <PR番号>` → STEP 6
+- REQUEST_CHANGES → `tidd ai-review --continue-with-verdict REQUEST_CHANGES <PR番号>` を実行してコメントを投稿する → 修正して push し、試行回数をインクリメントして再実行
 - Agent tool が利用できない場合（subagent 起動失敗等）→ 下記の失敗記録後に人間エスカレーション
 
 ## fallback 自体が失敗した時の loop-error 記録（Issue #1750）
@@ -103,7 +105,7 @@ printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/ai-dev-handbook/ai-re
 4. `--continue-with-verdict` 内のコメント投稿に失敗した（GitHub API エラー・token 期限切れ等）
 
 ```bash
-uv run --project projects/py/tidd_tools python -m tidd_tools loop-error-log \
+tidd loop-error-log \
   --pr <PR番号> \
   --step ai-review:fallback-failed \
   --error "<失敗の 1 行サマリー>" \

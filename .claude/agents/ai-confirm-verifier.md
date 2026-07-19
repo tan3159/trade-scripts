@@ -71,4 +71,4 @@ model: sonnet
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
 - `.claude/hooks/_lib/session_detector.py` — セッション判定（本 subagent の呼び出し可否判定）
 - `docs/reference/session-detector.md` — session_detector の使い方
-- `projects/py/tidd_tools/src/tidd_tools/ai_review/verify_ai_confirm.py` — session 外用 stub
+- `tidd_tools.ai_review.verify_ai_confirm` モジュール — session 外用 stub

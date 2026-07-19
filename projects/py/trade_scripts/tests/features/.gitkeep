@@ -1,0 +1,2 @@
+# Issue の `## 振る舞い` を `tidd extract-feature <N>` で `.feature` として生成する配置場所。
+# 生成後は本ファイルを削除してよい。

@@ -1,0 +1,2 @@
+# `tidd extract-feature <N>` が生成する pytest-bdd step_defs skeleton の配置場所。
+# 生成後は本ファイルを削除してよい。

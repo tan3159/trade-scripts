@@ -27,9 +27,35 @@ from _lib.gh_cache import upsert_issue as _upsert_issue  # noqa: E402
 from _lib.hook_io import get_command, is_hook_enabled, read_hook_input  # noqa: E402
 
 # 旧 sh: grep -qE '(^|&&|;)\s*git commit(\s|$)'
-_GIT_COMMIT_RE = re.compile(r"(^|&&|;)\s*git commit(\s|$)")
+# Issue #2226: `git -C <path> commit` 形式（クロスリポジトリコミット）も検出対象に含める。
+_GIT_COMMIT_RE = re.compile(r"(^|&&|;)\s*git(?:\s+-C\s+\S+)?\s+commit(\s|$)")
 # 旧 sh: grep -qiE 'closes #[0-9]+'
 _CLOSES_RE = re.compile(r"closes #([0-9]+)", re.IGNORECASE)
+
+# Issue #2226: `cd <path> &&` / `git -C <path>` から対象リポジトリのパスを解決する。
+_CD_PREFIX_RE = re.compile(r"(?:^|&&|;)\s*cd\s+(.+?)\s*&&")
+_GIT_DASH_C_RE = re.compile(r"git\s+-C\s+(\"[^\"]+\"|'[^']+'|\S+)")
+
+
+def _strip_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _resolve_target_repo_path(command: str) -> str | None:
+    """コマンド文字列から対象リポジトリのパスを解決する（Issue #2226）.
+
+    `cd <path> &&` prefix があればそのパスを、`git -C <path>` があればそのパスを返す。
+    どちらも見つからなければ None（セッション CWD をそのまま使う従来挙動）。
+    """
+    match = _CD_PREFIX_RE.search(command)
+    if match:
+        return _strip_quotes(match.group(1).strip())
+    match = _GIT_DASH_C_RE.search(command)
+    if match:
+        return _strip_quotes(match.group(1).strip())
+    return None
 
 
 # Issue #1463: adaptive stale TTL の閾値
@@ -63,12 +89,14 @@ def _get_rate_limit_remaining() -> int | None:
 _RATE_LIMIT_SENTINEL: dict[str, str] = {"__rate_limit_exceeded__": "true"}
 
 
-def _verify_issue_via_gh(issue_number: int) -> dict | None:
+def _verify_issue_via_gh(issue_number: int, cwd: str | None = None) -> dict | None:
     """gh subprocess で Issue 存在を確認する。存在すれば dict を返す。
 
     Issue #1463: `gh` の stderr に "rate limit" が含まれる場合は
     ``_RATE_LIMIT_SENTINEL`` を返して呼び出し側で bypass 経路に流す。
     通常の失敗（Issue が存在しない・network error 等）は従来通り None。
+    Issue #2226: ``cwd`` 指定時はそのディレクトリで `gh issue view` を実行する
+    （クロスリポジトリコミット時に対象リポジトリを照会するため）。
     """
     try:
         result = subprocess.run(
@@ -77,6 +105,7 @@ def _verify_issue_via_gh(issue_number: int) -> dict | None:
             text=True,
             check=False,
             timeout=10,
+            cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -94,16 +123,27 @@ def _verify_issue_via_gh(issue_number: int) -> dict | None:
         return None
 
 
-def _issue_exists(issue_number: int) -> bool:
+def _issue_exists(issue_number: int, repo_path: str | None = None) -> bool:
     """Issue の存在を確認する（#1393 SWR + #1463 adaptive TTL + #1969 rate limit 判定の遅延化）。
 
-    優先順:
+    Issue #2226: ``repo_path`` 指定時（コマンドが `cd <path> &&` / `git -C <path>` で
+    セッション CWD と異なるリポジトリを対象にしている場合）は、セッション CWD の
+    gh-cache（別リポジトリのキャッシュ）を使わず、対象リポジトリで直接 `gh issue view`
+    を実行して存在確認する。
+
+    優先順（``repo_path`` 未指定時。従来どおり）:
     1. fresh cache hit → 即 True
     2. stale cache hit → stale を即返し BG refresh 起動（rate limit guard は BG 側 gh_cache_refresh.py が行う。#1969）
     3. cache 完全 miss → rate limit 判定
        - remaining < 5 → allow without verification（一時 bypass・stderr 通知）
        - それ以外 → 同期 gh fetch（rate limit 枯渇 sentinel は bypass）
     """
+    if repo_path is not None:
+        data = _verify_issue_via_gh(issue_number, cwd=repo_path)
+        if data is _RATE_LIMIT_SENTINEL:
+            return True
+        return data is not None
+
     # 1. fresh cache hit（既存テスト互換のため独立チェックを維持）
     fresh = _get_issue_fresh(issue_number)
     if fresh is not None:
@@ -152,7 +192,8 @@ def _main_impl() -> tuple[int, dict[str, object]]:
         return 2, {"blocked_by": "no_closes_ref"}
 
     issue_number = int(match.group(1))
-    if not _issue_exists(issue_number):
+    repo_path = _resolve_target_repo_path(command)
+    if not _issue_exists(issue_number, repo_path=repo_path):
         sys.stderr.write(
             f"Blocked: Issue #{issue_number} が見つかりません。"
             "有効な Issue 番号で closes #N を指定してください。\n"

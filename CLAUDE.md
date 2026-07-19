@@ -36,4 +36,4 @@ ai-dev-handbook が管理する共通部分で、`copier update` で最新版に
 **TDD/BDD必須:** feat/fix実装時はテスト先行。詳細: `.claude/rules/test-plan-checklist.md`
 **テスト:** GAS → Jest、Python → pytest（詳細: `.claude/rules/testing-framework.md`）
 **GitHub 操作:** セッション内は `mcp__github__*` 優先。tidd_tools/CI/cron は `gh`（詳細: `.claude/rules/workflow.md`）
-**Hooks:** `.claude/hooks/` の振る舞い・ブロック条件: `docs/reference/hooks.md`
+**Hooks:** `.claude/hooks/` の振る舞い・ブロック条件: https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/hooks.md

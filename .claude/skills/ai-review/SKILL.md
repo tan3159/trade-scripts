@@ -90,7 +90,7 @@ codex exec --quiet "<プロンプト + diff>"
 
 STEP 2 で取得した diff に以下のパスが含まれるか確認する:
 
-- `projects/py/tidd_tools/src/tidd_tools/ai_review/**`
+- `tidd_tools/ai_review/**`
 - `.claude/hooks/validate-issue.py`
 - `.claude/hooks/require-issue.py`
 
@@ -273,7 +273,7 @@ exit 2
 verdict に応じて:
 
 ```bash
-uv run --project projects/py/tidd_tools python -m tidd_tools ai-review \
+tidd ai-review \
   --continue-with-verdict <APPROVE|REQUEST_CHANGES> <N>
 ```
 
@@ -305,6 +305,6 @@ PR コメントに投稿し、`needs-human-merge` ラベルを付与して exit 
 ## 関連
 
 - `.claude/agents/verdict-extractor.md` — verdict 抽出 subagent
-- `projects/py/tidd_tools/src/tidd_tools/ai_review/core.py` — Python の tidd ai-review
+- `tidd_tools/ai_review/core.py` — Python の tidd ai-review
 - `docs/reference/ai-review-skill.md` — 詳細ドキュメント
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針

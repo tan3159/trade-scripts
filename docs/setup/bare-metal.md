@@ -2,7 +2,7 @@
 
 「chezmoi・Bitwarden・agy・mise を使いたくない」ユーザー向けの最小依存経路。手動編集ベースで運用する。
 
-> **5 分で動かしたい場合はまず [`quick-start.md`](./quick-start.md)。**
+> **5 分で動かしたい場合はまず [`quick-start.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/quick-start.md)。**
 
 ## WSL2 推奨・Windows ネイティブは制限あり
 
@@ -19,7 +19,7 @@
 | `bw-session-check` | ✅ | ✅（`bw.exe` 不在時は env fallback） | |
 
 **Windows ネイティブで動かす場合:** direnv の代わりに mise `[env]` または
-PowerShell profile を使う。詳細は [`windows-native.md`](./windows-native.md) を参照。
+PowerShell profile を使う。詳細は [`windows-native.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/windows-native.md) を参照。
 
 ### Windows での `bw-session-check` 動作（Issue #1637）
 
@@ -92,7 +92,7 @@ gh auth login
 **なくても** Claude Code 単体で `/ai-review` skill が動く（Wave 3 #1425 で inline fallback 禁止化されているが、
 `ai-reviewer.md` subagent フォールバックは有効）。
 
-- 詳細: [`ai-review-credentials.md`](./ai-review-credentials.md)
+- 詳細: [`ai-review-credentials.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/ai-review-credentials.md)
 
 ### B. 環境変数のセットアップ（direnv / .envrc）
 
@@ -176,7 +176,7 @@ export OPENAI_API_KEY="sk-..."
 > `bw get password "..."` 相当を環境変数で置き換える場合も、値の中身は log / diff / 会話に混入させない。
 > ファイル配置場所は `~/.env`（`.gitignore` 済み）や systemd EnvironmentFile 等の非 git 管理領域に限定する。
 
-- 詳細: [`ai-review-credentials.md`](./ai-review-credentials.md) の「Bitwarden fallback」節
+- 詳細: [`ai-review-credentials.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/ai-review-credentials.md) の「Bitwarden fallback」節
 - 実装: `projects/py/tidd_tools/src/tidd_tools/shared/secrets.py`（`get_secret()`・`_has_env_value()`）
 
 ### C. dotfiles 同期は手動
@@ -249,12 +249,12 @@ export NOTIFY_EMAIL="tan3159@gmail.com"
 
 ## 関連
 
-- [Quick Start](./quick-start.md) — 5 分で動かす最短経路
-- [フル環境セットアップ](./new-environment-setup.md) — chezmoi・mise・Bitwarden 込みのフル構成
+- [Quick Start](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/quick-start.md) — 5 分で動かす最短経路
+- [フル環境セットアップ](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/new-environment-setup.md) — chezmoi・mise・Bitwarden 込みのフル構成
 - [secrets-management.md](./secrets-management.md) — 方式 A / 方式 B / CI × Win/Linux のマトリクス手順（**秘匿情報管理の全体ガイド**）
-- [ai-review-credentials.md](./ai-review-credentials.md) — 環境変数一覧・Bitwarden アイテム名の詳細
+- [ai-review-credentials.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/ai-review-credentials.md) — 環境変数一覧・Bitwarden アイテム名の詳細
 - [`.envrc.example`](../../.envrc.example) — 環境変数設定テンプレート（方式 A 直書き / 方式 B Bitwarden 参照）
-- [ADR 013: Windows first-class support](../decisions/013-windows-first-class-support.md) — Windows 対応方針
+- [ADR 013: Windows first-class support](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/decisions/013-windows-first-class-support.md) — Windows 対応方針
 - Issue #1314: 本ドキュメント新設
 - Issue #1315: Bitwarden なしフォールバック実装
 - Issue #1630: shared/secrets.py 新設（SECRETS_BACKEND 対応）

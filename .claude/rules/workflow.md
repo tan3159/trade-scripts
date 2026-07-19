@@ -33,7 +33,7 @@
 1. `gh issue view <N>`
 2. `git fetch origin`
 3. `git worktree add -b <type>/issue-N-slug ../<repo>-issue-N-slug origin/main`（末尾 `origin/main` 必須）
-4. **worktree に `cd` した直後に `.venv` を初期化する（#2035/#2178）** — `uv venv --python 3.11 --clear && uv sync --project projects/py/tidd_tools --extra dev`。省略すると `.venv` が Python 3.14 + dev extra 抜きで作られ、ai-review が `Failed to spawn: ruff` で失敗する。
+4. `tidd` は `uv tool install` でグローバル導入済み（[docs/setup/copier-workflow-adoption.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/copier-workflow-adoption.md) §3）のため、worktree ごとの `.venv` 初期化は不要。`tidd --version` で疎通確認できる
 5. worktree ディレクトリで作業
 
 `git checkout -b` 等は hook がブロック（詳細: [docs/reference/hooks.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/hooks.md)）
@@ -50,7 +50,7 @@
 1. PR 本文に `closes #N` 必須（`gh pr create`）
 2. PR タイトル: `<type>(<scope>): #N 説明`（hook 強制）
 3. **同期（前景）実行必須（#1232）** — `run_in_background` / `nohup` / `&` / `ScheduleWakeup` 禁止:
-   `uv run --project projects/py/tidd_tools python -m tidd_tools ai-review <PR> 1`
+   `tidd ai-review <PR> 1`
 
 | exit | 意味 | 対応 |
 |---|---|---|

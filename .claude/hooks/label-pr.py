@@ -47,6 +47,8 @@ from _lib.hook_io import (  # noqa: E402
 
 _GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
 _PR_URL_RE = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/(\d+)")
+# Issue #2226: `-R`/`--repo` フラグ検出（セッションリポジトリ以外への PR 作成）
+_REPO_FLAG_RE = re.compile(r"(?:^|\s)(?:-R|--repo)(?:=|\s+)(\S+)")
 
 # ブランチ名プレフィックス → type ラベル
 _BRANCH_TO_LABEL: dict[str, str] = {
@@ -322,6 +324,26 @@ def _main() -> int:
 
     command = get_command(payload)
     if not _GH_PR_CREATE_RE.search(command):
+        return 0
+
+    # Issue #2226: `-R`/`--repo` 指定時はセッションリポジトリ以外への PR 作成のため、
+    # `gh pr view`/`gh pr edit` がセッション CWD のリポジトリで実行され誤動作する。
+    # ラベル体系が異なる可能性もあるためスキップする（実装時判断）。
+    repo_flag_match = _REPO_FLAG_RE.search(command)
+    if repo_flag_match:
+        repo_flag = repo_flag_match.group(1)
+        sys.stderr.write(
+            f"label-pr.py: skip: gh pr create に -R/--repo {repo_flag!r} が指定されています"
+            "（セッションリポジトリ以外への PR のため、ラベル付与をスキップします）\n"
+        )
+        _write_last_run(
+            {
+                "status": "skipped",
+                "reason": "cross-repo PR (-R/--repo specified)",
+                "repo_flag": repo_flag,
+                "command": command[:200],
+            }
+        )
         return 0
 
     # ここから先は「gh pr create の PostToolUse」経路。すべての exit 点で
