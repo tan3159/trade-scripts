@@ -3,6 +3,9 @@
 # primary_language に応じて依存関係エコシステムを切り替える
 # （Python -> uv・それ以外（TypeScript / GAS / Other）-> npm）。
 # ci_provider=github-actions のときは GitHub Actions のバージョン更新も追跡する。
+# dependabot_ignore_major=true（デフォルト）のときは各 update ブロックに
+# version-update:semver-major の ignore を追加し、breaking change を含みうる
+# major bump の自動 PR 作成を抑制する（#2280）。
 version: 2
 updates:
 
@@ -11,8 +14,17 @@ updates:
     schedule:
       interval: "weekly"
 
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
