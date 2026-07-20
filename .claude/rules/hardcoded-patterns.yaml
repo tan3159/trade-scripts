@@ -1,0 +1,28 @@
+# ハードコード検出パターン追加定義（Issue #1642）
+#
+# `ban-hardcoded-repo.py` hook が git commit 前にステージング済みファイルをスキャンし、
+# ここに登録されたパターンを検出するとブロックする。
+#
+# デフォルトパターン（being-gaia-plan, ai-dev-handbook）は `_lib/hardcoded_repo.py` に
+# 定義されており、このファイルは追加パターンの拡張点として機能する。
+#
+# 追加方法:
+# 1. `patterns:` リストに `- id / regex / description / message` エントリを追加する
+# 2. `regex` は Python 3 の `re` モジュールで評価される（stdlib のみ・PyYAML 不使用）
+# 3. consumer が自組織のパターンを追加したい場合もこのファイルを編集する
+# 4. 追加後は `docs/reference/hooks.md#ban-hardcoded-repopy` の説明も更新する
+#
+# 注意（CRITICAL）:
+# - regex が不正な場合は起動時に WARN を出して該当パターンを skip する（exit は 0）
+# - 除外ロジック（コメント行・HINT 行・除外 basename）は既存の `is_excluded_line` 等に従う
+#
+# フォーマット:
+#   - id: <一意の識別子（英小文字・ハイフン）>
+#     regex: '<Python re 互換の正規表現（YAML でシングルクォート推奨）>'
+#     description: '<パターンの意味（1 行）>'
+#     message: '<検出時に stderr に出力するメッセージ>'
+#
+# #2239: このファイルは配布用 skeleton（org 固有パターンなし）。
+# 自組織のメールドメイン・個人 username 等のパターンは consumer 側で追加する。
+
+patterns: []
