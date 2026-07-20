@@ -9,7 +9,7 @@ dependencies = []
 # Issue #2113 と同じ理由で pytest の上限を固定する: pytest-bdd 8.1.0 が
 # pytest 10 で削除される内部 API を使用しているため。
 dev = [
-    "pytest>=8.0,<10",
+    "pytest>=9.1.1,<10",
     "pytest-bdd>=7.0",
     "pytest-mock>=3.12",
     "pytest-cov>=5.0",
