@@ -7,15 +7,20 @@
 CI 再待ち」という往復コストを毎 PR で踏んでいる。ruff format と同様に
 `require-ruff-format.py`（#1752）と同構造でローカル gate に前出しする。
 
-本 hook は `gh pr create` の Bash 呼び出しを検知して `projects/py/tidd_tools/` を
+本 hook は `gh pr create` の Bash 呼び出しを検知して `projects/py/` 配下から
+検査対象プロジェクト（`src/` を持つディレクトリ）を動的に検出し、そのディレクトリを
 cwd に `uv run mypy src/` を実行し、型エラーがあれば exit 2 で block する。
 （repo root から `mypy src/` は解決できないため、CI ステップと同じくプロジェクト
 ディレクトリを cwd にして実行する。）
 
+**対象プロジェクトの検出（Issue #2278）:** `projects/py/tidd_tools/src/` が存在すれば
+handbook 自身の従来挙動を保つため優先的に選ぶ。存在しない consumer レイアウトでは
+`projects/py/` 配下で `src/` を持つ最初のディレクトリ（名前順）を対象にする。
+
 **skip する条件（exit 0 + stderr に WARN）:**
 
 - `uv` が PATH に存在しない
-- 対象ディレクトリ `projects/py/tidd_tools/src/` が存在しない
+- `projects/py/` 配下に `src/` を持つプロジェクトが 1 つも存在しない
 - mypy が `REQUIRE_MYPY_TIMEOUT_SEC`（default 120s）で timeout
 
 stdlib のみ使用。
@@ -38,8 +43,28 @@ from _lib.hook_io import (  # noqa: E402
 )
 
 _GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
-_TARGET_SUBDIR = "projects/py/tidd_tools"
+_PROJECTS_PY_SUBDIR = "projects/py"
+_PREFERRED_PROJECT_NAME = "tidd_tools"
 _DEFAULT_TIMEOUT_SEC = 120
+
+
+def _find_target_dir(repo_root: Path) -> Path | None:
+    """`projects/py/` 配下から検査対象プロジェクトを検出する（Issue #2278）.
+
+    consumer では `projects/py/tidd_tools` が存在しないため、`src/` を持つ
+    プロジェクトディレクトリを動的に探す。`tidd_tools` が存在する場合は
+    handbook 自身の従来挙動を保つため優先的に選ぶ。
+    """
+    projects_py = repo_root / _PROJECTS_PY_SUBDIR
+    if not projects_py.is_dir():
+        return None
+    preferred = projects_py / _PREFERRED_PROJECT_NAME
+    if (preferred / "src").is_dir():
+        return preferred
+    candidates = sorted(
+        p for p in projects_py.iterdir() if p.is_dir() and (p / "src").is_dir()
+    )
+    return candidates[0] if candidates else None
 
 
 def _git_toplevel() -> Path | None:
@@ -89,10 +114,10 @@ def _main() -> int:
         # git 外なら判定不能 → 通す
         return 0
 
-    target_dir = repo_root / _TARGET_SUBDIR
-    if not (target_dir / "src").is_dir():
+    target_dir = _find_target_dir(repo_root)
+    if target_dir is None:
         sys.stderr.write(
-            f"WARN: require-mypy: 対象ディレクトリ {_TARGET_SUBDIR}/src が見つかりません。skip します。\n"
+            f"WARN: require-mypy: {_PROJECTS_PY_SUBDIR}/ 配下に src を持つプロジェクトが見つかりません。skip します。\n"
         )
         return 0
 

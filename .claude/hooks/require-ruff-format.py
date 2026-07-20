@@ -7,15 +7,20 @@
 silent 失敗（exit 0）する設計のため、network 断・外部エディタ経由の変更・過去 commit の
 未整形コードを catch できない。
 
-本 hook は `gh pr create` の Bash 呼び出しを検知して
-`uv run --project projects/py/tidd_tools ruff format --check projects/py/tidd_tools`
-を実行し、未整形ファイルがあれば `.venv/bin/ruff format` で自動整形し
-`git add` + `git commit` 後に exit 0 で PR 作成を継続する（Issue #1934 Phase B）。
+本 hook は `gh pr create` の Bash 呼び出しを検知して `projects/py/` 配下から
+検査対象プロジェクトを動的に検出し、
+`uv run --project <target> ruff format --check <target>` を実行し、未整形ファイルが
+あれば `.venv/bin/ruff format` で自動整形し `git add` + `git commit` 後に exit 0 で
+PR 作成を継続する（Issue #1934 Phase B）。
+
+**対象プロジェクトの検出（Issue #2278）:** `projects/py/tidd_tools/` が存在すれば
+handbook 自身の従来挙動を保つため優先的に選ぶ。存在しない consumer レイアウトでは
+`projects/py/` 配下の最初のディレクトリ（名前順）を対象にする。
 
 **skip する条件（exit 0 + stderr に WARN）:**
 
 - `uv` が PATH に存在しない
-- 対象ディレクトリ `projects/py/tidd_tools/` が存在しない
+- `projects/py/` 配下にプロジェクトディレクトリが 1 つも存在しない
 - ruff format --check が `REQUIRE_RUFF_FORMAT_TIMEOUT_SEC`（default 60s）で timeout
 
 **exit 2 でブロックする条件:**
@@ -44,9 +49,27 @@ from _lib.hook_io import (  # noqa: E402
 )
 
 _GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
-_TARGET_SUBDIR = "projects/py/tidd_tools"
+_PROJECTS_PY_SUBDIR = "projects/py"
+_PREFERRED_PROJECT_NAME = "tidd_tools"
 _DEFAULT_TIMEOUT_SEC = 60
 _ISSUE_NUM_RE = re.compile(r"issue-(\d+)")
+
+
+def _find_target_dir(repo_root: Path) -> Path | None:
+    """`projects/py/` 配下から検査対象プロジェクトを検出する（Issue #2278）.
+
+    consumer では `projects/py/tidd_tools` が存在しないため、プロジェクト
+    ディレクトリを動的に探す。`tidd_tools` が存在する場合は handbook 自身の
+    従来挙動を保つため優先的に選ぶ。
+    """
+    projects_py = repo_root / _PROJECTS_PY_SUBDIR
+    if not projects_py.is_dir():
+        return None
+    preferred = projects_py / _PREFERRED_PROJECT_NAME
+    if preferred.is_dir():
+        return preferred
+    candidates = sorted(p for p in projects_py.iterdir() if p.is_dir())
+    return candidates[0] if candidates else None
 
 
 def _git_toplevel() -> Path | None:
@@ -231,12 +254,13 @@ def _main() -> int:
         # git 外なら判定不能 → 通す
         return 0
 
-    target_dir = repo_root / _TARGET_SUBDIR
-    if not target_dir.is_dir():
+    target_dir = _find_target_dir(repo_root)
+    if target_dir is None:
         sys.stderr.write(
-            f"WARN: require-ruff-format: 対象ディレクトリ {_TARGET_SUBDIR} が見つかりません。skip します。\n"
+            f"WARN: require-ruff-format: {_PROJECTS_PY_SUBDIR}/ 配下にプロジェクトが見つかりません。skip します。\n"
         )
         return 0
+    target_subdir = str(target_dir.relative_to(repo_root))
 
     try:
         result = subprocess.run(
@@ -244,11 +268,11 @@ def _main() -> int:
                 "uv",
                 "run",
                 "--project",
-                _TARGET_SUBDIR,
+                target_subdir,
                 "ruff",
                 "format",
                 "--check",
-                _TARGET_SUBDIR,
+                target_subdir,
             ],
             cwd=str(repo_root),
             capture_output=True,
@@ -287,10 +311,10 @@ def _main() -> int:
         sys.stderr.write("解決手順:\n")
         sys.stderr.write(f"  cd {repo_root}\n")
         sys.stderr.write(
-            "  uv run --project projects/py/tidd_tools ruff format projects/py/tidd_tools\n"
+            f"  uv run --project {target_subdir} ruff format {target_subdir}\n"
         )
         sys.stderr.write(
-            "  git add -u -- projects/py/tidd_tools && git commit -m 'style: apply ruff format'\n"
+            f"  git add -u -- {target_subdir} && git commit -m 'style: apply ruff format'\n"
         )
         sys.stderr.write("  git push\n")
         sys.stderr.write("\n")
@@ -298,7 +322,7 @@ def _main() -> int:
         return 2
 
     # .venv/bin/ruff が存在する → 自動整形 + commit → exit 0 で継続
-    return _apply_ruff_format_and_commit(repo_root, venv_ruff, _TARGET_SUBDIR)
+    return _apply_ruff_format_and_commit(repo_root, venv_ruff, target_subdir)
 
 
 def main() -> int:
