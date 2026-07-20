@@ -13,7 +13,7 @@ dev = [
     "pytest-bdd>=7.0",
     "pytest-mock>=3.12",
     "pytest-cov>=5.0",
-    "mypy>=1.11",
+    "mypy>=2.3.0",
     "ruff>=0.15.22",
 ]
 
