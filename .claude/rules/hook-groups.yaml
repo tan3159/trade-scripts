@@ -68,6 +68,7 @@ groups:
       - on-stop
       - analyze-loop-on-stop
       - yaru-auto-tick
+      - require-issue-next-completion
 
   - name: observability
     label: 計測系

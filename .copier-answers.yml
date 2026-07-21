@@ -1,5 +1,5 @@
 # このファイルは copier が自動更新する。手動編集しないこと。
-_commit: v2026.07.21
+_commit: v2026.07.21.1
 _src_path: git+https://github.com/being-gaia-plan/ai-dev-handbook.git
 ci_provider: github-actions
 dependabot_ignore_major: 'true'
@@ -11,5 +11,5 @@ project_name: TradeScripts
 python_package_name: trade_scripts
 technology_radar_url: ''
 use_coderabbit: 'false'
-use_scorecard: 'false'
+use_scorecard: 'true'
 use_security_policy: 'true'

@@ -95,18 +95,27 @@ _BRANCH_DELETE_FORCE_RE = re.compile(
 _COMMAND_CHAIN_RE = re.compile(r"(;|&&|\|\|)")
 # -D を含むトークンを検出し、それ以降のトークン列を返すための正規表現
 _DASH_D_TOKEN_RE = re.compile(r"-[a-zA-Z]*D[a-zA-Z]*")
+# harness が付与する先頭の `cd <path> &&` prefix（Issue #2317）。
+# Claude Code の Bash tool が別ディレクトリで実行する際にこの形式でラップするため、
+# 危険なコマンド連結ではなく安全な前置として許容する。
+_LEADING_CD_PREFIX_RE = re.compile(r"^cd\s+\S+\s*&&\s*")
+
+
+def _strip_leading_cd_prefix(normalized: str) -> str:
+    """harness が付与する先頭の `cd <path> &&` prefix を取り除く（Issue #2317）."""
+    return _LEADING_CD_PREFIX_RE.sub("", normalized, count=1)
 
 
 def _check_branch_delete_safe(normalized: str) -> bool:
     """git branch -D が安全に許可できる条件を判定する.
 
     旧 sh の条件:
-      1. コマンド連結（; && ||）を含まない
+      1. コマンド連結（; && ||）を含まない（harness の先頭 `cd <path> &&` prefix は除く）
       2. -D フラグ以降のトークン数が1（ブランチ1つだけ）
       3. そのブランチに紐付く PR が MERGED 状態
       4. ローカル HEAD = PR の headRefOid （squash merge 後の追加コミット無し）
     """
-    if _COMMAND_CHAIN_RE.search(normalized):
+    if _COMMAND_CHAIN_RE.search(_strip_leading_cd_prefix(normalized)):
         return False
 
     tokens = normalized.split()
