@@ -1,5 +1,5 @@
 # このファイルは copier が自動更新する。手動編集しないこと。
-_commit: v2026.07.21.1
+_commit: v2026.07.22
 _src_path: git+https://github.com/being-gaia-plan/ai-dev-handbook.git
 ci_provider: github-actions
 dependabot_ignore_major: 'true'
