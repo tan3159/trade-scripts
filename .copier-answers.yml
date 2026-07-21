@@ -10,6 +10,6 @@ primary_language: Python
 project_name: TradeScripts
 python_package_name: trade_scripts
 technology_radar_url: ''
-use_coderabbit: 'false'
+use_coderabbit: 'true'
 use_scorecard: 'true'
 use_security_policy: 'true'

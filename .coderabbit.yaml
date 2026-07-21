@@ -1,0 +1,21 @@
+# CodeRabbit 設定（copier 配布・#2274・use_coderabbit=true のときのみ配布）
+#
+# CodeRabbit は advisory review 専用。auto-merge gate は引き続き tidd ai-review
+# （`.claude/rules/review-backends.md`）が担い、本ファイルの指摘は
+# request_changes_workflow: false によりブロッキング化しない。
+# 導入手順（GitHub App install 等）: docs/setup/copier-workflow-adoption.md
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+language: "ja-JP"
+
+reviews:
+  profile: "chill"
+  # tidd ai-review を唯一の auto-merge gate に保つため、CodeRabbit 自体は
+  # PR を REQUEST_CHANGES 状態にしない（advisory コメントのみ）。
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+
+chat:
+  auto_reply: true
