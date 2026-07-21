@@ -15,6 +15,7 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -44,17 +45,19 @@ def _strip_quotes(value: str) -> str:
 
 
 def _resolve_target_repo_path(command: str) -> str | None:
-    """コマンド文字列から対象リポジトリのパスを解決する（Issue #2226）.
+    """コマンド文字列から対象リポジトリのパスを解決する（Issue #2226 / #2304）.
 
     `cd <path> &&` prefix があればそのパスを、`git -C <path>` があればそのパスを返す。
     どちらも見つからなければ None（セッション CWD をそのまま使う従来挙動）。
+    Issue #2304: 抽出したパスは `os.path.expanduser` でチルダ展開してから返す
+    （`~` を展開しないまま `subprocess.run(cwd=...)` に渡すと cwd 不正で誤ブロックする）。
     """
     match = _CD_PREFIX_RE.search(command)
     if match:
-        return _strip_quotes(match.group(1).strip())
+        return os.path.expanduser(_strip_quotes(match.group(1).strip()))
     match = _GIT_DASH_C_RE.search(command)
     if match:
-        return _strip_quotes(match.group(1).strip())
+        return os.path.expanduser(_strip_quotes(match.group(1).strip()))
     return None
 
 
@@ -137,12 +140,21 @@ def _issue_exists(issue_number: int, repo_path: str | None = None) -> bool:
     3. cache 完全 miss → rate limit 判定
        - remaining < 5 → allow without verification（一時 bypass・stderr 通知）
        - それ以外 → 同期 gh fetch（rate limit 枯渇 sentinel は bypass）
+
+    Issue #2304: ``repo_path`` が存在しないディレクトリの場合（誤ったパス抽出・
+    未展開のチルダ等）は誤ブロックせず、WARN を stderr に出力してセッション CWD の
+    通常フロー（``repo_path`` 未指定時と同じ優先順）にフォールバックする。
     """
     if repo_path is not None:
-        data = _verify_issue_via_gh(issue_number, cwd=repo_path)
-        if data is _RATE_LIMIT_SENTINEL:
-            return True
-        return data is not None
+        if os.path.isdir(repo_path):
+            data = _verify_issue_via_gh(issue_number, cwd=repo_path)
+            if data is _RATE_LIMIT_SENTINEL:
+                return True
+            return data is not None
+        sys.stderr.write(
+            f"WARN: 対象パス {repo_path} が見つからないため、"
+            "セッション CWD で Issue 確認を行います。\n"
+        )
 
     # 1. fresh cache hit（既存テスト互換のため独立チェックを維持）
     fresh = _get_issue_fresh(issue_number)

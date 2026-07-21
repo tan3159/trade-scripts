@@ -81,8 +81,10 @@ Write ツールにより保存すること。
 
 agy が利用不可（QUOTA_EXCEEDED・未インストール）の場合は codex にフォールバック:
 ```bash
-codex exec --quiet "<プロンプト + diff>"
+codex exec -o /tmp/agent-review-<N>-codex-last.txt "<プロンプト + diff>"
 ```
+`-o`（`--output-last-message`）はエージェントの最終メッセージのみを指定ファイルへ書き出すため、
+上記の生セッションログ混入を避けやすい（廃止済み `--quiet` フラグは使わない）。
 
 どちらも利用不可の場合は exit 3 を返す。
 
@@ -146,6 +148,21 @@ subagent は次の JSON を返す:
 
 `_is_parser_critical=true` かつ STEP 5 の verdict が `APPROVE` の場合のみ実行する。
 `_is_parser_critical=false` または verdict が `REQUEST_CHANGES` / `ESCALATE` の場合はスキップして STEP 6 へ進む。
+
+**secondary レビューより先に primary review コメントを投稿する（Issue #2314）:**
+
+STEP 6 の `--continue-with-verdict` は primary review コメントを内部で投稿するが、
+STEP 5.5 は STEP 6 より前に実行されるため、そのまま進むと secondary review コメント・
+consensus コメントが primary review コメントより先に GitHub 上へ投稿されてしまう
+（投稿順序が primary → secondary → consensus からずれる）。secondary レビューを実行する前に
+以下を実行し、primary review コメントを先に投稿しておく:
+
+```bash
+tidd ai-review --post-primary-review <N>
+```
+
+投稿済みフラグ（`cwv-approved`）が立つため、STEP 6 の `--continue-with-verdict APPROVE <N>` は
+コメントを再投稿せずマージ判定へ直接進む。
 
 **まず primary backend を確認する:**
 

@@ -53,6 +53,10 @@
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-ng-words.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-red-first.py\""
           },
           {
@@ -70,6 +74,14 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-merge-ci-status.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-tick-issue-items.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-preflight-marker.py\""
           }
         ]
       },
@@ -79,6 +91,10 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-issue-id-in-pr-title.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-tick-issue-items.py\""
           }
         ]
       },
@@ -104,6 +120,10 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-skill.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-ng-words.py\""
           }
         ]
       }
@@ -139,6 +159,10 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/analyze-loop-on-stop.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-issue-next-completion.py\""
           }
         ]
       }
