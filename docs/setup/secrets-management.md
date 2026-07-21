@@ -176,8 +176,11 @@ tidd ai-review --help   # bw から自動取得してトークンが解決され
 | `GH_TOKEN` | `GitHub PAT（ai-reviewer）` | PR 操作 |
 | `OPENAI_API_KEY` | `OpenAI API Key` | codex backend |
 | `GOOGLE_APPLICATION_CREDENTIALS_JSON` | `Google Cloud SA Key（agy）` | agy backend |
+| `GITHUB_MCP_PAT` | `ai-review/github-mcp-pat-tan3159` | `.mcp.json` の github MCP server（`mcp__github__*`） |
 
 詳細な環境変数一覧は [`ai-review-credentials.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/setup/ai-review-credentials.md) を参照。
+
+> **適用記録（Issue #23・2026-07-22）:** `_load_ai_review_secrets`（s-tanaka-dotfiles#43）でリポジトリ owner 名（`tan3159`）から bw アイテム suffix を導出し、`GITHUB_MCP_PAT` / `GH_TOKEN` を export した状態で Claude Code を起動。`mcp__github__get_me` が疎通し、github MCP server（`mcp__github__*`）が利用可能になったことを確認済み。
 
 ---
 
