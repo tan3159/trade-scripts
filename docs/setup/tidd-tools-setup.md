@@ -36,6 +36,24 @@ python3 -c "import shutil; print(shutil.which('tidd'))"  # hooks からの PATH 
   `~/.local/bin` が PATH に入っていれば no-op にならず動作する
 - 実運用確認済み: PR #11 を `tidd ai-review 11 1` → APPROVE → auto-merge まで完走（2026-07-17）
 
+## pytest-bdd による feat/fix の 2 層テスト構造（Issue #22）
+
+`projects/py/trade_scripts` の dev 依存に `pytest-bdd` を追加済み。feat/fix Issue の
+`## 振る舞い` セクションから `.feature` + step_defs skeleton を生成する:
+
+```bash
+tidd extract-feature <Issue番号>
+```
+
+- **`--out-dir`・`--step-defs-dir` の指定は不要**（trade-scripts は `projects/py/` 配下に
+  単一プロジェクトのみのため、上流 #2258 の自動解決で `projects/py/trade_scripts/tests/features/`・
+  `tests/step_defs/` に出力される）
+- 生成物は `uv run --extra dev pytest` で collect・実行できる（動作確認済み: 2026-07-22、
+  Issue #49 で検証用 `.feature` を生成し `pytest --collect-only`・`ruff check`・`mypy` が
+  いずれも問題なく通ることを確認済み）
+- step_defs skeleton は `pytest.xfail()` で保留状態のまま生成される。実装完了時に `xfail` を
+  外して真の実装に置き換えること（`xfail` のままマージ禁止・`.claude/rules/testing-framework.md`）
+
 ## gh アカウントの使い分け（本環境固有）
 
 `tidd ai-review` は対象リポジトリへの write（レビュー投稿・マージ）に gh の認証を使う。
