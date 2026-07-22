@@ -9,6 +9,7 @@ bin/
 .claude/settings.local.json
 .claude/ai-reviewer
 .claude/scheduled_tasks.lock
+.claude/ng-words.local.txt
 .direnv/
 
 # Python
