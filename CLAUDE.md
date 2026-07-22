@@ -10,11 +10,11 @@ ai-dev-handbook が管理する共通部分で、`copier update` で最新版に
 
 **GitHub Org:** `tan3159`
 
-## 状況依存ルールの参照（trade-scripts 固有）
+## 状況依存ルールの参照
 
 以下は該当作業の直前に Read する（常時ロードしない）。
 
-- **スクリーンショット参照:** 保存先は環境変数 `SCREENSHOT_DIR`（bashrc で export 済み・dotfiles 管理）。「スクショ見て」と言われたら `ls -t "$SCREENSHOT_DIR"` で最新ファイルを特定して Read する。詳細: [docs/reference/screenshot-rules.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/screenshot-rules.md)
+- **スクリーンショット参照:** `docs/reference/screenshot-rules.md`
 <!-- END: repo-specific -->
 
 ## 行動原則
