@@ -57,30 +57,21 @@ tidd extract-feature <Issue番号>
 ## ai-review-repo-config.toml による App 切り替え（Issue #56）
 
 public リポジトリでは `tidd ai-review` が Bitwarden 読み込みをスキップする（security: 任意 bash 実行リスク）。
-事前に環境変数へシークレットを設定してから実行する:
+`tidd` の env fallback（Issue #1315）を利用して、実値を直接環境変数に設定してから実行する:
 
 ```bash
+# APP_ID / INSTALLATION_ID / PRIVATE_KEY_CONTENT はレビュー App 認証用
+# GH_TOKEN はオーナーアカウントの write 権限トークン（gh auth token で取得）
 APP_ID=$(bw get password "ai-review/app-id-<app-item>") \
 INSTALLATION_ID=$(bw get password "ai-review/installation-id-<app-item>") \
 PRIVATE_KEY_CONTENT=$(bw get password "ai-review/private-key-<app-item>") \
-GH_TOKEN=$(bw get password "ai-review/gh-token-<gh-item>") \
-  bash -c 'GH_TOKEN=$(gh auth token -u <owner-account>) tidd ai-review <PR> <試行回数>'
+GH_TOKEN=$(gh auth token -u <owner-account>) \
+  tidd ai-review <PR> <試行回数>
 ```
 
-`.claude/ai-review-repo-config.toml` の `*_ITEM` 変数はセッション経由でのみ使用され、
-public repo での Bitwarden スキップを回避するためには環境変数を直接設定する必要がある。
+`.claude/ai-review-repo-config.toml` の `*_ITEM` 変数（Bitwarden アイテム名の差し替え）は
+private repo の Bitwarden 経路でのみ機能する。public repo では env fallback 経路を使うこと。
 上流修正追跡: 上流ハンドブック #2415（public repo での env fallback 対応）
-
-便宜上 `~/.bashrc.local` に以下の関数を追加しておくと手順を短縮できる:
-
-```bash
-_load_<reponame>_review_secrets() {
-  APP_ID_ITEM="ai-review/app-id-<app-item>" \
-  INSTALLATION_ID_ITEM="ai-review/installation-id-<app-item>" \
-  PRIVATE_KEY_ITEM="ai-review/private-key-<app-item>" \
-  _load_ai_review_secrets
-}
-```
 
 ## gh アカウントの使い分け（本環境固有）
 
