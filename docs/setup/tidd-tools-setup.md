@@ -54,6 +54,34 @@ tidd extract-feature <Issue番号>
 - step_defs skeleton は `pytest.xfail()` で保留状態のまま生成される。実装完了時に `xfail` を
   外して真の実装に置き換えること（`xfail` のままマージ禁止・`.claude/rules/testing-framework.md`）
 
+## ai-review-repo-config.toml による App 切り替え（Issue #56）
+
+public リポジトリでは `tidd ai-review` が Bitwarden 読み込みをスキップする（security: 任意 bash 実行リスク）。
+事前に環境変数へシークレットを設定してから実行する:
+
+```bash
+APP_ID=$(bw get password "ai-review/app-id-<app-item>") \
+INSTALLATION_ID=$(bw get password "ai-review/installation-id-<app-item>") \
+PRIVATE_KEY_CONTENT=$(bw get password "ai-review/private-key-<app-item>") \
+GH_TOKEN=$(bw get password "ai-review/gh-token-<gh-item>") \
+  bash -c 'GH_TOKEN=$(gh auth token -u <owner-account>) tidd ai-review <PR> <試行回数>'
+```
+
+`.claude/ai-review-repo-config.toml` の `*_ITEM` 変数はセッション経由でのみ使用され、
+public repo での Bitwarden スキップを回避するためには環境変数を直接設定する必要がある。
+上流修正追跡: 上流ハンドブック #2415（public repo での env fallback 対応）
+
+便宜上 `~/.bashrc.local` に以下の関数を追加しておくと手順を短縮できる:
+
+```bash
+_load_<reponame>_review_secrets() {
+  APP_ID_ITEM="ai-review/app-id-<app-item>" \
+  INSTALLATION_ID_ITEM="ai-review/installation-id-<app-item>" \
+  PRIVATE_KEY_ITEM="ai-review/private-key-<app-item>" \
+  _load_ai_review_secrets
+}
+```
+
 ## gh アカウントの使い分け（本環境固有）
 
 `tidd ai-review` は対象リポジトリへの write（レビュー投稿・マージ）に gh の認証を使う。
