@@ -1,0 +1,11 @@
+# リポジトリ宣言型 Bitwarden 認証設定
+#
+# tidd_tools ai-review が起動時にこのファイルを tomllib で読み、
+# tan3159 個人 GitHub App（ai-reviewer-tan3159）の認証情報に切り替える。
+#
+# 詳細: docs/setup/tidd-tools-setup.md
+
+APP_ID_ITEM = "ai-review/app-id-tan3159"
+INSTALLATION_ID_ITEM = "ai-review/installation-id-tan3159"
+PRIVATE_KEY_ITEM = "ai-review/private-key-tan3159"
+GH_TOKEN_ITEM = "ai-review/gh-token-s-tanaka"  # pragma: allowlist secret
