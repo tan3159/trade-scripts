@@ -9,6 +9,12 @@ ai-dev-handbook が管理する共通部分で、`copier update` で最新版に
 -->
 
 **GitHub Org:** `tan3159`
+
+## 状況依存ルールの参照
+
+以下は該当作業の直前に Read する（常時ロードしない）。
+
+- **スクリーンショット参照:** `docs/reference/screenshot-rules.md`
 <!-- END: repo-specific -->
 
 ## 行動原則
