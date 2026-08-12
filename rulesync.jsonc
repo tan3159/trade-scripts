@@ -1,0 +1,11 @@
+{
+  "$schema": "https://github.com/dyoshikawa/rulesync/releases/latest/download/config-schema.json",
+  // consumer の AGENTS.md は rulesync が .rulesync/rules/*.md（overview.md + 9 本）を
+  // flat 展開して生成する（#3711）。settings.json は copier の merge_settings.py が
+  // MANAGED/PRESERVED をマージして管理するため hooks 生成は無効化する（#3711）。
+  "targets": {
+    "claudecode": ["rules"],
+    "codexcli": ["rules"]
+  },
+  "outputRoots": ["."]
+}

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: PR タイトルに Issue ID (#N) が含まれることを強制する.
+r"""PreToolUse hook: PR タイトルに Issue ID (#N) と `<type>(<scope>): ` 形式を強制する.
 
 Issue #1840: PR タイトルに Issue ID が含まれていない PR が混在しており、
 PR 一覧から対応 Issue をすぐに特定できない問題を解消する。
+Issue #3424: タイトル先頭が `<type>(<scope>): ` 形式でない PR が作成できるせいで、
+PR 一覧・コミット履歴からの変更種別の把握や label-pr.py の自動ラベリング精度が下がる問題を解消する。
 
 **ブロック条件:**
 - `gh pr create` コマンドの `--title` に `#数字` 形式の Issue ID が含まれていない
 - `mcp__github__create_pull_request` の `title` に `#数字` 形式の Issue ID が含まれていない
+- タイトル先頭が `^(feat|fix|docs|refactor|ci|build|chore|research)(\([^)]+\))?!?: `
+  に一致しない（scope 括弧は任意・breaking change の `!` は許容）
 
 **バイパス:**
 - PR ボディに `<!-- allow-no-issue-id: <理由> -->` マーカーが含まれている場合は通過する
@@ -23,16 +27,23 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import (  # noqa: E402
+from _lib.gh_command import extract_pr_body as _extract_body
+from _lib.gh_command import is_gh_pr_create as _is_gh_pr_create
+from _lib.hook_io import (
     get_command,
     get_tool_name,
     is_hook_enabled,
     read_hook_input,
 )
+from _lib.override_markers import has_override_marker
 
-_GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
 _ISSUE_ID_RE = re.compile(r"#\d+")
-_ALLOW_NO_ISSUE_ID_RE = re.compile(r"<!--\s*allow-no-issue-id:")
+# Issue #3424: タイトル先頭の `<type>(<scope>): ` 形式。
+# scope 括弧は任意・breaking change の `!` は許容。type 一覧はリポジトリのラベル体系と一致。
+_TYPE_PREFIX_RE = re.compile(
+    r"^(feat|fix|docs|refactor|ci|build|chore|research)(\([^)]+\))?!?: "
+)
+_ALLOW_NO_ISSUE_ID_MARKER = "allow-no-issue-id"
 _MCP_CREATE_PR_TOOL = "mcp__github__create_pull_request"
 
 
@@ -53,37 +64,10 @@ def _extract_title(command: str) -> str:
     return ""
 
 
-def _extract_body(command: str) -> str:
-    """gh pr create コマンドから --body / --body-file の値を抽出する."""
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return ""
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok in ("--body", "-b") and i + 1 < len(tokens):
-            return tokens[i + 1]
-        if tok.startswith("--body="):
-            return tok[len("--body=") :]
-        if tok in ("--body-file", "-F") and i + 1 < len(tokens):
-            try:
-                return Path(tokens[i + 1]).read_text(encoding="utf-8")
-            except OSError:
-                return ""
-        if tok.startswith("--body-file="):
-            try:
-                return Path(tok[len("--body-file=") :]).read_text(encoding="utf-8")
-            except OSError:
-                return ""
-        i += 1
-    return ""
-
-
 def _check_title_and_body(title: str, body: str, title_hint: str) -> int:
     """タイトルと本文を検証して exit code を返す."""
     if not title:
-        if _ALLOW_NO_ISSUE_ID_RE.search(body):
+        if has_override_marker(body, _ALLOW_NO_ISSUE_ID_MARKER):
             sys.stderr.write(
                 "require-issue-id-in-pr-title: allow-no-issue-id マーカーを検出しました。bypass します。\n"
             )
@@ -102,9 +86,23 @@ def _check_title_and_body(title: str, body: str, title_hint: str) -> int:
         return 2
 
     if _ISSUE_ID_RE.search(title):
-        return 0
+        # Issue #3424: Issue ID を含んでいてもタイトル先頭が type(scope) 形式でなければブロック
+        if _TYPE_PREFIX_RE.match(title):
+            return 0
+        sys.stderr.write(
+            "Blocked: PR タイトルは `<type>(<scope>): #N 説明` 形式にしてください。\n"
+            "\n"
+            f"  現在のタイトル: {title!r}\n"
+            "  期待形式:       <type>(<scope>): #N 説明\n"
+            "  修正例:         feat(tidd_tools): #123 説明文\n"
+            "\n"
+            "  type は次のいずれかです: feat / fix / docs / refactor / ci / build / chore / research\n"
+            "\n"
+            "詳細: docs/reference/hooks.md#require-issue-id-in-pr-titlepy\n"
+        )
+        return 2
 
-    if _ALLOW_NO_ISSUE_ID_RE.search(body):
+    if has_override_marker(body, _ALLOW_NO_ISSUE_ID_MARKER):
         sys.stderr.write(
             "require-issue-id-in-pr-title: allow-no-issue-id マーカーを検出しました。bypass します。\n"
         )
@@ -141,7 +139,7 @@ def _main() -> int:
     if tool_name != "Bash":
         return 0
     command = get_command(payload)
-    if not _GH_PR_CREATE_RE.search(command):
+    if not _is_gh_pr_create(command):
         return 0
 
     title = _extract_title(command)

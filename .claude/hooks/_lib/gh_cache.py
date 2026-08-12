@@ -17,6 +17,7 @@ DB スキーマ（3 テーブル）:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -35,7 +36,10 @@ def _resolve_db_path() -> Path:
     try:
         r = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             m = re.search(r"/([^/]+?)(?:\.git)?$", r.stdout.strip())
@@ -71,7 +75,9 @@ def _open_db() -> sqlite3.Connection | None:
         return None
 
 
-def _get_row(conn: sqlite3.Connection, table: str, where: str, params: tuple) -> Any | None:
+def _get_row(
+    conn: sqlite3.Connection, table: str, where: str, params: tuple
+) -> Any | None:
     try:
         row = conn.execute(
             f"SELECT data FROM {table} WHERE {where} AND expires_at > ?",
@@ -110,12 +116,21 @@ def get_pr_by_branch(branch: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def _current_git_branch() -> str | None:
-    """現在チェックアウト中のブランチ名を返す。取得失敗時は None."""
+def _current_git_branch(cwd: str | None = None) -> str | None:
+    """現在チェックアウト中のブランチ名を返す。取得失敗時は None.
+
+    Issue #3284: hook プロセスは worktree ではなくメイン checkout の CWD で
+    実行されるため、``cwd`` で worktree の git_root を明示できるようにする。
+    省略時はプロセス CWD（従来どおり）。
+    """
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=False, timeout=5,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            cwd=cwd,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -123,10 +138,11 @@ def _current_git_branch() -> str | None:
     return branch if result.returncode == 0 and branch and branch != "HEAD" else None
 
 
-def get_current_branch_pr() -> dict[str, Any] | None:
+def get_current_branch_pr(cwd: str | None = None) -> dict[str, Any] | None:
     """現在ブランチの PR 情報を返す。
 
     ブランチ切替後のキャッシュ不一致・期限切れ・未存在時は None を返す。
+    Issue #3284: ``cwd`` は worktree の git_root（ブランチ判定用）。
     """
     conn = _open_db()
     if conn is None:
@@ -140,25 +156,29 @@ def get_current_branch_pr() -> dict[str, Any] | None:
     # 保存時のブランチと現在のブランチが一致するか検証する
     stored_ref = pr.get("headRefName")
     if stored_ref:
-        current = _current_git_branch()
+        current = _current_git_branch(cwd=cwd)
         if current and current != stored_ref:
             return None  # ブランチ切替後のため無効
     return pr
 
 
-def get_pr_body() -> str | None:
-    """現在ブランチの PR body を返す。キャッシュ未存在・期限切れ時は None."""
-    pr = get_current_branch_pr()
+def get_pr_body(cwd: str | None = None) -> str | None:
+    """現在ブランチの PR body を返す。キャッシュ未存在・期限切れ時は None.
+
+    Issue #3284: ``cwd`` は worktree の git_root（ブランチ判定用）。
+    """
+    pr = get_current_branch_pr(cwd=cwd)
     if pr is None:
         return None
     body = pr.get("body")
     return body if isinstance(body, str) else None
 
 
-def get_pr_body_stale() -> str | None:
+def get_pr_body_stale(cwd: str | None = None) -> str | None:
     """現在ブランチの PR body を TTL 無視で返す（GitHub API 障害時のフォールバック用）。
 
     ブランチ一致チェックは行うが、TTL は無視する。キャッシュ未存在時は None。
+    Issue #3284: ``cwd`` は worktree の git_root（ブランチ判定用）。
     """
     conn = _open_db()
     if conn is None:
@@ -173,7 +193,7 @@ def get_pr_body_stale() -> str | None:
         # ブランチが切り替わっていたら無効とする（TTL は無視）
         stored_ref = pr.get("headRefName")
         if stored_ref:
-            current = _current_git_branch()
+            current = _current_git_branch(cwd=cwd)
             if current and current != stored_ref:
                 return None
         body = pr.get("body")
@@ -250,8 +270,80 @@ def upsert_issue(issue_number: int, data: dict[str, Any]) -> None:
         conn.close()
 
 
+def _bg_pid_dir() -> Path:
+    """Issue #1459: BG process PID を記録するディレクトリ."""
+    override = os.environ.get("GH_CACHE_BG_PID_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / ".cache" / "gh-cache-bg-pids"
+
+
+def _bg_lock_path(issue_number: int) -> Path:
+    """Issue #1459: BG refresh 用の flock パス (/tmp/gh-cache-<issue>.lock)."""
+    override = os.environ.get("GH_CACHE_LOCK_DIR")
+    lock_dir = Path(override) if override else Path("/tmp")
+    return lock_dir / f"gh-cache-{issue_number}.lock"
+
+
+def _cleanup_stale_bg_pids(max_age_hours: int = 24) -> None:
+    """Issue #1459: 古い BG PID ファイルの zombie を SIGTERM で掃除する.
+
+    ``~/.cache/gh-cache-bg-pids/`` 配下の PID ファイルで mtime が max_age_hours 以上前の
+    ものについて、対応するプロセスに SIGTERM を送り、ファイルを削除する。
+
+    Issue #1459 attempt 2 反映 (INFO): PID 再利用による誤 SIGTERM を防ぐため、
+    まず ``/proc/<pid>/cmdline`` を確認して gh_cache_refresh.py 由来かをチェックする。
+    /proc 未対応環境 (WSL2 一部・macOS) では従来通りの動作を維持する。
+    """
+    import signal
+    import time as _time
+
+    pid_dir = _bg_pid_dir()
+    if not pid_dir.is_dir():
+        return
+    cutoff = _time.time() - max_age_hours * 3600
+    for pid_file in pid_dir.glob("*.pid"):
+        try:
+            mtime = pid_file.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > cutoff:
+            continue
+        try:
+            pid_str = pid_file.read_text(encoding="utf-8").strip()
+            pid = int(pid_str) if pid_str else 0
+        except (OSError, ValueError):
+            pid = 0
+        if pid > 0:
+            # PID 再利用による誤 SIGTERM を防ぐ: cmdline 確認 (best-effort)
+            proc_cmdline = Path(f"/proc/{pid}/cmdline")
+            safe_to_kill = True
+            if proc_cmdline.is_file():
+                try:
+                    cmd = proc_cmdline.read_text(encoding="utf-8", errors="replace")
+                    # gh_cache_refresh.py 由来でなければ別プロセスなので kill しない
+                    if "gh_cache_refresh" not in cmd:
+                        safe_to_kill = False
+                except OSError:
+                    # /proc 読み取り失敗は kill を保留 (安全側)
+                    safe_to_kill = False
+            if safe_to_kill:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+        try:
+            pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _spawn_background_refresh(issue_number: int) -> None:
     """gh 再取得を detach 起動する。失敗しても silent (Issue #1393).
+
+    Issue #1459: flock (`/tmp/gh-cache-<issue>.lock`) で同一 issue_number の複数
+    BG refresh を抑止する。PID を `~/.cache/gh-cache-bg-pids/<issue>.pid` に記録して
+    zombie 掃除を可能にする。
 
     stale cache hit 時に呼ばれる。バックグラウンドプロセスが cache を更新するため、
     次回の hook 呼び出し時には fresh cache が返る。
@@ -259,8 +351,33 @@ def _spawn_background_refresh(issue_number: int) -> None:
     refresh_helper = Path(__file__).parent / "gh_cache_refresh.py"
     if not refresh_helper.is_file():
         return
+
+    # Issue #1459: flock で同一 issue_number の重複 BG 起動を抑止
+    lock_path = _bg_lock_path(issue_number)
+    lock_fd: int | None = None
     try:
-        subprocess.Popen(
+        import fcntl
+
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, BlockingIOError):
+            # 他プロセスが既にロック済み → BG 起動 skip
+            sys.stderr.write(f"BG refresh already running for issue {issue_number}\n")
+            os.close(lock_fd)
+            return
+    except (ImportError, OSError):
+        # Windows / fcntl 未対応環境ではロックせず従来通り Popen
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+        lock_fd = None
+
+    try:
+        proc = subprocess.Popen(
             [sys.executable, str(refresh_helper), str(issue_number)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -269,7 +386,24 @@ def _spawn_background_refresh(issue_number: int) -> None:
             close_fds=True,
         )
     except (FileNotFoundError, OSError):
+        # ロックは自動解放（fd close 時）
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+        return
+
+    # Issue #1459: BG PID を記録して zombie 掃除を可能にする
+    try:
+        pid_dir = _bg_pid_dir()
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        (pid_dir / f"{issue_number}.pid").write_text(str(proc.pid), encoding="utf-8")
+    except OSError:
         pass
+    # 注: lock_fd はここでは close しない
+    # Popen した子は独立 process なので、この process が終了しても lock は fd close で解放される
+    # ただし本 hook は短命なので実質「起動時のみの排他」として機能する
 
 
 def get_issue_or_stale_with_bg_refresh(issue_number: int) -> dict[str, Any] | None:

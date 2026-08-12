@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -28,30 +27,17 @@ BYPASS_ENV = "ALLOW_SH"
 
 
 def _read_input() -> dict:
-    """Claude Code が hook に渡す JSON を stdin から読み取る（Issue #1364: schema 検証付き）."""
-    try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    # Issue #1364: schema validation via _lib/validate_payload
+    """Claude Code が hook に渡す JSON を stdin から読み取る（Issue #2957: hook_io.read_hook_input へ集約）."""
     _lib_dir = Path(__file__).resolve().parent / "_lib"
     if str(_lib_dir) not in sys.path:
         sys.path.insert(0, str(_lib_dir))
     try:
-        from validate_payload import (  # type: ignore[import-not-found]
-            PayloadValidationError,
-            validate_payload,
+        from hook_io import (  # type: ignore[import-not-found]
+            read_hook_input as _read_hook_input,
         )
-
-        validate_payload(data, "PreToolUse")
     except ImportError:
-        pass  # validate_payload absent → skip（前方互換）
-    except PayloadValidationError as exc:
-        sys.stderr.write(f"{exc}\n")
-        sys.exit(2)
-    return data
+        return {}  # hook_io が存在しない場合は無視（前方互換）
+    return _read_hook_input(hook_name="PreToolUse")
 
 
 def _git_toplevel(start_dir: Path | None = None) -> Path | None:
@@ -59,21 +45,16 @@ def _git_toplevel(start_dir: Path | None = None) -> Path | None:
 
     `start_dir` が指定されたときはそのディレクトリを cwd にして git rev-parse を実行する。
     worktree が複数ある場合に「対象ファイル所在の worktree のルート」を取得する用途で使う。
+
+    Issue #2958: subprocess 実行部は `_lib/git_helpers.py` の `git_toplevel()` に委譲する
+    （本 hook の起動速度重視方針（<50ms）に合わせ、関数ローカルで遅延 import する）。
     """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(start_dir) if start_dir else None,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    out = result.stdout.strip()
+    _lib_dir = Path(__file__).resolve().parent / "_lib"
+    if str(_lib_dir) not in sys.path:
+        sys.path.insert(0, str(_lib_dir))
+    from git_helpers import git_toplevel  # type: ignore[import-not-found]
+
+    out = git_toplevel(cwd=str(start_dir) if start_dir else None, timeout=2)
     return Path(out) if out else None
 
 
@@ -121,12 +102,18 @@ def _main() -> int:
         return 0
 
     payload = _read_input()
+    try:
+        from hook_io import (  # type: ignore[import-not-found]
+            get_file_path,
+            is_file_edit_tool,
+        )
+    except ImportError:
+        return 0
     tool_name = str(payload.get("tool_name", ""))
-    if tool_name not in {"Edit", "Write"}:
+    if not is_file_edit_tool(tool_name):
         return 0
 
-    tool_input = payload.get("tool_input", {}) or {}
-    raw_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    raw_path = get_file_path(payload)
     if not raw_path:
         return 0
 
@@ -161,7 +148,9 @@ def main() -> int:
     if str(_lib_dir) not in sys.path:
         sys.path.insert(0, str(_lib_dir))
     try:
-        from hook_io import is_hook_enabled as _is_hook_enabled  # type: ignore[import-not-found]
+        from hook_io import (
+            is_hook_enabled as _is_hook_enabled,  # type: ignore[import-not-found]
+        )
 
         if not _is_hook_enabled("ban-shell-files"):
             return 0

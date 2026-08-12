@@ -18,9 +18,10 @@
 #   4. 品質ゲート系（validate-issue 等）
 #   5. 自動化系（label-pr 等）
 #
-# デフォルト: opt-in 設計（#2166）。安全系 3 hook（require-issue・block-dangerous-git・
-# ban-claude-p）のみ default ON、他は default OFF。~/.config/tidd_tools/hooks-config.json
-# で有効化する（キーに true を設定）。
+# デフォルト: opt-in 設計（#2166）。安全系 2 hook（block-dangerous-git・
+# ban-claude-p）のみ default ON、他は default OFF。~/.config/tidd_tools/config.json
+# で有効化する（キーに true を設定）。require-issue は tidd-enforcement グループ側の
+# opt-in hook（#2354・TiDD 採用は明示 opt-in にする）。
 # 参照: .claude/hooks/_lib/hook_io.py の is_hook_enabled()
 
 groups:
@@ -37,17 +38,31 @@ groups:
     hooks:
       - protect-tests
       - require-red-first
+      - require-red-first-proof
+      - require-target-marker
 
   - name: safety-guard
     label: 安全ガード系（シェルファイル禁止・不正インポート防止）
-    description: "危険な操作・禁止パターン・セキュリティを防護する"
+    description: "危険な操作・禁止パターン・セキュリティを防護する（うち安全 2 hook〔block-dangerous-git・ban-claude-p〕のみ default ON）"
     hooks:
       - block-dangerous-git
+      - block-subagent-review-merge
+      - block-unauthorized-fallback-review
+      - block-background-ai-review
+      - block-unattended-escalation
+      - require-worktree-for-edit
+      - require-subagent-prompt-contract
+      - require-quality-check
       - ban-shell-files
+      - ban-timing-mark-instruction
       - ban-anthropic-import
       - ban-claude-p
+      - ban-ng-words
       - ban-hardcoded-repo
       - ban-parents-n
+      - enforce-mcp-in-skills
+      - check-dependency-allowlist
+      - memguard
 
   - name: quality-gate
     label: 品質ゲート系
@@ -55,7 +70,17 @@ groups:
     hooks:
       - validate-issue
       - require-yaru-consistency
+      - block-direct-yaru-tick
       - detect-ai-confirm-misuse
+      - detect-rule-bloat
+      - require-issue-id-in-pr-title
+      - require-closes-in-pr-body
+      - require-no-xfail-stepdefs
+      - require-merge-ci-status
+      - require-mypy
+      - require-preflight-marker
+      - require-ruff-format
+      - validate-skill
 
   - name: automation
     label: 自動化系
@@ -63,15 +88,74 @@ groups:
     hooks:
       - label-pr
       - auto-ruff-format
+      - auto-tick-issue-items
+      - warn-diff-size
+      - session-start-venv-init
       - session-start-cache
       - session-start-health-check
+      - session-start-memory-warn
+      - session-start-claude-local-md-warn
+      - sync-global-tidd-entrypoints
       - on-stop
+      - on-stop-slack
+      - on-stop-orphan-detect
+      - on-stop-branch-cleanup
+      - on-stop-brief
       - analyze-loop-on-stop
       - yaru-auto-tick
       - require-issue-next-completion
+      - stamp-merge-summary-session
+      - sweep-merged-branches
 
   - name: observability
     label: 計測系
     description: "ai-review ステップ別 timing 計測など、パフォーマンス計測基盤（デフォルト off）"
     hooks:
       - ai-review-timing
+      - record-timing-boundaries
+
+  - name: distribution
+    label: 配布先専用系
+    description: "Copier で配布された consumer リポジトリ専用の hook（デフォルト off）"
+    hooks:
+      - notify-copier-staleness
+      - notify-template-sync
+
+  - name: backend-availability-agy
+    label: レビューバックエンド有効化設定（agy）
+    # default true: キー未設定 = 有効。config.json で false にすると無効化される
+    description: "tidd ai-review で使用する agy バックエンドの有効/無効を config.json で管理する（default: ON）"
+    hooks:
+      - ai-review-agy
+
+  - name: backend-availability-codex
+    label: レビューバックエンド有効化設定（codex）
+    # default true: キー未設定 = 有効。config.json で false にすると無効化される
+    description: "tidd ai-review で使用する codex バックエンドの有効/無効を config.json で管理する（default: ON）"
+    hooks:
+      - ai-review-codex
+
+  - name: backend-availability-custom
+    label: レビューバックエンド有効化設定（custom）
+    # default false: キー未設定 = 無効（opt-in）。AI_REVIEW_BACKEND=custom 固定実行時のみ有効
+    description: "tidd ai-review で使用する custom バックエンド（OpenAI 互換 API）の有効/無効を config.json で管理する（default: OFF）"
+    hooks:
+      - ai-review-custom
+
+  - name: impl-delegation
+    label: 実装委譲有効化設定
+    # default false: キー未設定 = 無効（opt-in）。tidd config enable impl-delegation --machine で有効化する
+    description: "tidd propose-step での外部 backend への実装委譲の有効/無効を config.json で管理する（default: OFF）"
+    hooks:
+      - impl-delegation
+
+  - name: impl-proposal-autoapply
+    label: 実装委譲 autoapply 有効化設定
+    # default false: キー未設定 = 無効（opt-in）。tidd config enable impl-proposal-autoapply --machine で有効化する
+    description: "tidd propose-step --apply（提案の直接ファイル書き込み）の有効/無効を config.json で管理する（default: OFF・Issue #3133）"
+    hooks:
+      - impl-proposal-autoapply
+
+  # secrets-backend は bool 前提の hook レジストリに登録しない（Issue #2533）。
+  # tidd configure --set secrets-backend=bw/env で文字列値として設定する。
+  # config enable/disable / config init --all-on の対象外。

@@ -1,0 +1,211 @@
+# .codex/rules/permissions.rules — Issue #3206
+#
+# `.claude/settings.json` の permissions（Bash allow/deny・prefix 型マッチング）の
+# Codex 移植。Codex の `prefix_rule` はコマンド引数リストの prefix 照合で、
+# 複数ルールがマッチした場合は最 restrictive 判定（forbidden > prompt > allow）が
+# 勝つ（OpenAI Codex 公式マニュアル "Rules"）。`bash -lc "..."` の安全な直列チェーンは
+# 個別コマンドへ分割されて評価される（compound 分割マッチング）。
+#
+# ソースパターンは各ルールの justification に `Bash(...)` 形式で転記してあり、
+# tests/regressions/test_feat_3206.py が移植漏れ・ドリフトを機械検証する。
+#
+# ファイルパス deny（Read/Write/Edit(**/.env) 等）と WebFetch(domain:...) は
+# execpolicy コマンドルールでは表現できない。Codex 相当は
+# `[permissions.filesystem]` glob deny（`default_permissions` プロファイル移行時）・
+# network domains 設定で担保する（詳細: docs/reference/codex-interop.md §4-4）。
+
+# ── deny: 破壊的操作の禁止（settings.json permissions.deny の Bash 系移植） ──
+
+# Bash(git push* --force) / Bash(git push* -f *) / Bash(git push* -f)
+# → force push は禁止。prefix 照合のため実務で出現し得る引数位置を列挙する
+# （任意引数の途中に --force が来る形は prefix 表現できない方式差として §4-4 に記録）。
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* --force) → force push 禁止（通常の push は git push ルールで allow）",
+    match = ["git push --force"],
+    not_match = ["git push origin main"],
+)
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* -f) / Bash(git push* -f *) → 短縮 force push 禁止",
+    match = ["git push -f"],
+    not_match = ["git push origin main"],
+)
+prefix_rule(
+    pattern = ["git", "push", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "安全側の追加: --force-with-lease も履歴書き換えのため禁止",
+    match = ["git push --force-with-lease"],
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], "--force"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* --force) → リモート指定 force push 禁止",
+    match = ["git push origin --force"],
+    not_match = ["git push origin main"],
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], "-f"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* -f) → リモート指定 -f 禁止",
+    match = ["git push origin -f"],
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], ["main", "master"], "--force"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* --force) → リモート+ブランチ指定 force push 禁止",
+    match = ["git push origin main --force"],
+    not_match = ["git push origin main"],
+)
+prefix_rule(
+    pattern = ["git", "push", ["origin", "upstream"], ["main", "master"], "-f"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git push* -f) → リモート+ブランチ指定 -f 禁止",
+    match = ["git push origin main -f"],
+)
+
+# Bash(git reset --hard*)
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git reset --hard*) → 履歴破棄の hard reset 禁止",
+    match = ["git reset --hard HEAD~1"],
+    not_match = ["git reset --soft HEAD~1"],
+)
+
+# Bash(git clean -f*)
+prefix_rule(
+    pattern = ["git", "clean", ["-f", "-fd", "-ff", "-fx", "--force"]],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git clean -f*) → 強制 clean 禁止",
+    match = ["git clean -fd"],
+    not_match = ["git clean -n"],
+)
+
+# Bash(git branch -D*)
+prefix_rule(
+    pattern = ["git", "branch", "-D"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(git branch -D*) → 強制ブランチ削除禁止（削除は cleanup-merged-branch 経由）",
+    match = ["git branch -D feature-x"],
+    not_match = ["git branch -d feature-x"],
+)
+
+# Bash(rm -rf*)
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr", "-Rf", "-r", "-R"]],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(rm -rf*) → 再帰削除禁止（worktree 削除は git worktree remove / tidd cleanup-merged-branch を使用）",
+    match = ["rm -rf /tmp/x"],
+    not_match = ["rm /tmp/x"],
+)
+prefix_rule(
+    pattern = ["rm", ["-r", "-R"], ["-f", "--force"]],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(rm -rf*) → 分割フラグ形式の再帰強制削除も禁止",
+    match = ["rm -r -f /tmp/x"],
+)
+
+# Bash(sudo rm*)
+prefix_rule(
+    pattern = ["sudo", "rm"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(sudo rm*) → sudo 経由の削除禁止",
+    match = ["sudo rm -rf /tmp/x"],
+)
+
+# ── deny: 環境変数ダンプ系（settings.json permissions.deny の Bash 系移植・#3298） ──
+# 事故防止の下限（`python3 -c "import os;print(os.environ)"` 等は denylist で防げない）。
+
+# Bash(env*)
+prefix_rule(
+    pattern = ["env"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(env*) → 環境変数ダンプによる秘密情報露出防止（#3298）",
+    match = ["env"],
+)
+
+# Bash(printenv*)
+prefix_rule(
+    pattern = ["printenv"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(printenv*) → 環境変数ダンプによる秘密情報露出防止（#3298）",
+    match = ["printenv"],
+)
+
+# Bash(set*)
+prefix_rule(
+    pattern = ["set"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(set*) → 環境変数ダンプによる秘密情報露出防止（#3298）",
+    match = ["set"],
+)
+
+# Bash(export -p*)
+prefix_rule(
+    pattern = ["export", "-p"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(export -p*) → 環境変数ダンプによる秘密情報露出防止（#3298）",
+    match = ["export -p"],
+)
+
+# Bash(declare -x*)
+prefix_rule(
+    pattern = ["declare", "-x"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(declare -x*) → 環境変数ダンプによる秘密情報露出防止（#3298）",
+    match = ["declare -x"],
+)
+
+# ── allow: 通常ワークフローコマンドの許可（settings.json permissions.allow の Bash 系移植） ──
+# decision="allow" はサンドボックス外でプロンプトなし実行を許可する（Claude Code の
+# allow リスト相当）。deny ルールと衝突した場合は forbidden が優先される。
+
+prefix_rule(pattern = ["git", "status"], decision = "allow", justification = "Claude Code 相当: Bash(git status*)")
+prefix_rule(pattern = ["git", "log"], decision = "allow", justification = "Claude Code 相当: Bash(git log*)")
+prefix_rule(pattern = ["git", "diff"], decision = "allow", justification = "Claude Code 相当: Bash(git diff*)")
+prefix_rule(pattern = ["git", "add"], decision = "allow", justification = "Claude Code 相当: Bash(git add*)")
+prefix_rule(pattern = ["git", "commit"], decision = "allow", justification = "Claude Code 相当: Bash(git commit*)")
+prefix_rule(pattern = ["git", "push"], decision = "allow", justification = "Claude Code 相当: Bash(git push*)（force 系は deny ルールで forbidden）")
+prefix_rule(pattern = ["git", "pull"], decision = "allow", justification = "Claude Code 相当: Bash(git pull*)")
+prefix_rule(pattern = ["git", "checkout"], decision = "allow", justification = "Claude Code 相当: Bash(git checkout*)")
+prefix_rule(pattern = ["git", "branch"], decision = "allow", justification = "Claude Code 相当: Bash(git branch*)（-D は deny ルールで forbidden）")
+prefix_rule(pattern = ["git", "merge"], decision = "allow", justification = "Claude Code 相当: Bash(git merge*)")
+prefix_rule(pattern = ["git", "stash"], decision = "allow", justification = "Claude Code 相当: Bash(git stash*)")
+prefix_rule(pattern = ["git", "config"], decision = "allow", justification = "Claude Code 相当: Bash(git config*)")
+prefix_rule(pattern = ["git", "update-index"], decision = "allow", justification = "Claude Code 相当: Bash(git update-index*)")
+prefix_rule(pattern = ["git", "ls-remote"], decision = "allow", justification = "Claude Code 相当: Bash(git ls-remote*)")
+prefix_rule(pattern = ["git", "worktree", "add"], decision = "allow", justification = "Claude Code 相当: Bash(git worktree add*)")
+prefix_rule(pattern = ["git", "worktree", "list"], decision = "allow", justification = "Claude Code 相当: Bash(git worktree list*)")
+prefix_rule(pattern = ["git", "worktree", "prune"], decision = "allow", justification = "Claude Code 相当: Bash(git worktree prune*)")
+prefix_rule(pattern = ["tidd", "cleanup-merged-branch"], decision = "allow", justification = "Claude Code 相当: Bash(tidd cleanup-merged-branch*)")
+prefix_rule(pattern = ["gh", "issue"], decision = "allow", justification = "Claude Code 相当: Bash(gh issue*)")
+prefix_rule(pattern = ["gh", "pr"], decision = "allow", justification = "Claude Code 相当: Bash(gh pr*)")
+prefix_rule(pattern = ["gh", "api"], decision = "allow", justification = "Claude Code 相当: Bash(gh api*)")
+prefix_rule(pattern = ["gh", "label"], decision = "allow", justification = "Claude Code 相当: Bash(gh label*)")
+prefix_rule(pattern = ["gh", "repo"], decision = "allow", justification = "Claude Code 相当: Bash(gh repo*)")
+prefix_rule(pattern = ["gh", "search"], decision = "allow", justification = "Claude Code 相当: Bash(gh search*)")
+prefix_rule(pattern = ["cat"], decision = "allow", justification = "Claude Code 相当: Bash(cat*)")
+prefix_rule(pattern = ["ls"], decision = "allow", justification = "Claude Code 相当: Bash(ls*)")
+prefix_rule(pattern = ["find"], decision = "allow", justification = "Claude Code 相当: Bash(find*)")
+prefix_rule(pattern = ["grep"], decision = "allow", justification = "Claude Code 相当: Bash(grep*)")
+prefix_rule(pattern = ["echo"], decision = "allow", justification = "Claude Code 相当: Bash(echo*)")
+prefix_rule(pattern = ["curl"], decision = "allow", justification = "Claude Code 相当: Bash(curl*)")
+prefix_rule(pattern = ["wc"], decision = "allow", justification = "Claude Code 相当: Bash(wc*)")
+prefix_rule(pattern = ["head"], decision = "allow", justification = "Claude Code 相当: Bash(head*)")
+prefix_rule(pattern = ["tail"], decision = "allow", justification = "Claude Code 相当: Bash(tail*)")
+prefix_rule(pattern = ["sort"], decision = "allow", justification = "Claude Code 相当: Bash(sort*)")
+prefix_rule(pattern = ["sed"], decision = "allow", justification = "Claude Code 相当: Bash(sed*)")
+prefix_rule(pattern = ["awk"], decision = "allow", justification = "Claude Code 相当: Bash(awk*)")
+prefix_rule(pattern = ["chmod"], decision = "allow", justification = "Claude Code 相当: Bash(chmod*)")
+prefix_rule(pattern = ["cp"], decision = "allow", justification = "Claude Code 相当: Bash(cp*)")
+prefix_rule(pattern = ["mv"], decision = "allow", justification = "Claude Code 相当: Bash(mv*)")
+prefix_rule(pattern = ["mkdir"], decision = "allow", justification = "Claude Code 相当: Bash(mkdir*)")
+prefix_rule(pattern = ["touch"], decision = "allow", justification = "Claude Code 相当: Bash(touch*)")
+prefix_rule(pattern = ["node"], decision = "allow", justification = "Claude Code 相当: Bash(node*)")
+prefix_rule(pattern = ["npm"], decision = "allow", justification = "Claude Code 相当: Bash(npm*)")
+prefix_rule(pattern = ["jq"], decision = "allow", justification = "Claude Code 相当: Bash(jq*)")
+prefix_rule(pattern = ["shellcheck"], decision = "allow", justification = "Claude Code 相当: Bash(shellcheck*)")
+prefix_rule(pattern = ["python3"], decision = "allow", justification = "Claude Code 相当: Bash(python3 *)")

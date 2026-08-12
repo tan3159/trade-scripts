@@ -1,6 +1,6 @@
 # Tool Calling 設計指針
 
-> **注記:** 以下の機械強制（`ban-anthropic-import` 等）は `hooks-config.json` で対応 hook を enable した利用者にのみ適用される。`copier copy` 直後の consumer はすべて default OFF のため、規約記述は参照目的。
+> **注記:** 以下の機械強制（`ban-anthropic-import` 等）は `config.json` で対応 hook を enable した利用者にのみ適用される。`copier copy` 直後の consumer はすべて default OFF のため、規約記述は参照目的。
 
 **CRITICAL（#1281）:** Anthropic SDK / `anthropic` の直接インポートを全廃。Tool Calling は Agent tool / subagent / skill 経由で実装する。`.claude/hooks/ban-anthropic-import.py` が機械強制でブロックする。
 
@@ -42,4 +42,4 @@
 
 ---
 
-**詳細（agy 役割分担・structured output・テンプレート・効果測定）:** [docs/reference/subagent-design-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/subagent-design-guide.md)
+**詳細（agy 役割分担・structured output・テンプレート・効果測定）:** docs/reference/subagent-design-guide.md

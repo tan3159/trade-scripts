@@ -19,17 +19,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_command, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.git_helpers import run_git as _run_git
+from _lib.hook_io import get_command, is_hook_enabled, read_hook_input
 
 
 def _git(*args: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False, timeout=10
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
+    """Issue #2958: subprocess 実行部は `_lib.git_helpers.run_git()` に委譲する."""
+    result = _run_git(*args, timeout=10)
+    if result is None or result.returncode != 0:
         return None
     return result.stdout.strip()
 

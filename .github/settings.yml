@@ -1,0 +1,140 @@
+# .github/settings.yml — probot/settings App（hosted: apps/settings）で
+# リポジトリ設定を宣言的に管理するファイル（#2368 見直しにより safe-settings から変更・
+# 判断ジャーナル: docs/decisions/2026-07-23-settings-app-scope-over-safe-settings.md）。
+#
+# `settings` App の Repository access に対象 consumer が含まれているときにのみ有効。
+# scope 追加手順: docs/setup/copier-workflow-adoption.md §8.6 参照。
+#
+# [copier update での扱い]
+# このファイルは copier.yml の _skip_if_exists に含まれるため、
+# consumer が独自ラベルを追加しても copier update で上書きされない（#2357）。
+#
+# [#2357] ラベル定義は settings.yml 側を single source とする。
+# tidd repo-bootstrap の labels ロジック撤去（#2353）後はこのファイルが
+# consumer の labels の唯一の定義元になる。
+
+repository:
+  # マージ設定（squash merge のみ許可）
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+
+  # PR マージ後のブランチ自動削除
+  delete_branch_on_merge: true
+
+  # Issue・Projects・Wiki
+  has_issues: true
+  has_projects: true
+  has_wiki: false
+
+branches:
+  - name: main
+    protection:
+      # PR レビュー必須（最低 1 名の approve）
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: false
+      # 必須 status checks（probot/settings が設定できる範囲）
+      required_status_checks:
+        strict: false
+        contexts: []
+      # 管理者も保護ルールを適用
+      enforce_admins: false
+      # force push・ブランチ削除を禁止
+      restrictions: null
+
+labels:
+  # ---------- type ----------
+  - name: "type: feat"
+    color: "7c3aed"
+    description: "新機能・新ドキュメント追加"
+  - name: "type: fix"
+    color: "dc2626"
+    description: "バグ・誤り修正"
+  - name: "type: docs"
+    color: "0e7490"
+    description: "ドキュメントのみの変更"
+  - name: "type: refactor"
+    color: "525252"
+    description: "動作変更なしのコード改善"
+  - name: "type: ci"
+    color: "2563eb"
+    description: "CI/CDパイプライン"
+  - name: "type: build"
+    color: "525252"
+    description: "ビルドシステム・依存関係"
+  - name: "type: research"
+    color: "d97706"
+    description: "調査・情報収集"
+  - name: "type: chore"
+    color: "525252"
+    description: "設定変更・依存関係更新など（コード変更なし）"
+
+  # ---------- priority ----------
+  - name: "priority: critical"
+    color: "b91c1c"
+    description: "今すぐ対応・ブロッカー"
+  - name: "priority: high"
+    color: "c2410c"
+    description: "重要・今の作業サイクルで"
+  - name: "priority: medium"
+    color: "a16207"
+    description: "通常優先度"
+  - name: "priority: low"
+    color: "15803d"
+    description: "後回し可・バックログ"
+
+  # ---------- source (type: fix 専用) ----------
+  - name: "source: ci"
+    color: "94a3b8"
+    description: "CI（CircleCI 等）から自動起票された Issue"
+  - name: "source: rework"
+    color: "e11d48"
+    description: "AI 実装の手戻り（廃止対応漏れ・設計漏れ・プロンプト不備等）"
+  - name: "source: human-report"
+    color: "0ea5e9"
+    description: "運用中に人間が観察・体験して起票"
+  - name: "source: new-bug"
+    color: "f59e0b"
+    description: "外部要因（証明書期限・ツール変更・依存更新）や初期設定ミスによる突発バグ"
+  - name: "source: spec-change"
+    color: "8b5cf6"
+    description: "セキュリティ要件・設計見直し・ポリシー変更に起因する修正"
+
+  # ---------- status ----------
+  - name: "status: blocked"
+    color: "f97316"
+    description: "何かに詰まっている"
+  - name: "\U0001f64b needs-human-input"
+    color: "f59e0b"
+    description: "エージェントが着手しない（人間の判断・確認が必要）"
+  - name: "needs-human-merge"
+    color: "f97316"
+    description: "人間マージ待ち（.claude/**, CLAUDE.md, scripts/** 等の停止条件ファイルを含む PR）"
+  - name: "duplicate-suspect"
+    color: "D4C5F9"
+    description: "重複の疑いがある Issue（/detect-duplicates skill による自動検出）"
+  - name: "\U0001f527 in-progress"
+    color: "1d4ed8"
+    description: "issue-next が着手中（多重着手防止・マシンをまたいで可視・Issue #2804）"
+
+  # ---------- size ----------
+  - name: "size/XS"
+    color: "BFDCFF"
+    description: "PR size: <10 lines"
+  - name: "size/S"
+    color: "7FBFFF"
+    description: "PR size: <50 lines"
+  - name: "size/M"
+    color: "FFD966"
+    description: "PR size: <250 lines"
+  - name: "size/L"
+    color: "FFA500"
+    description: "PR size: <500 lines"
+  - name: "size/XL"
+    color: "FF6B6B"
+    description: "PR size: <1000 lines"
+  - name: "size/XXL"
+    color: "8B0000"
+    description: "PR size: >=1000 lines (auto REQUEST_CHANGES)"

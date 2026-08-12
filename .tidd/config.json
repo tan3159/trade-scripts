@@ -1,0 +1,4 @@
+{
+  "block-dangerous-git": true,
+  "ban-claude-p": true
+}

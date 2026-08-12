@@ -27,4 +27,10 @@
 2. テスト先行で書いたテストが要求する実装
 3. 明らかなセキュリティ脆弱性の指摘（修正は別 Issue 化を提案）
 
-詳細（各パターン詳細例・コード例・違反時対応）: [docs/reference/implementation-constraints-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/implementation-constraints-guide.md)
+---
+
+## ツール・ライブラリのエラーが解消しないときは最新の公式ドキュメントを確認する
+
+ツール・ライブラリのエラーが試行錯誤しても解消しないとき、学習時点の設定方法・API が変わっている可能性がある。最新の公式ドキュメント（リリースノート・マイグレーションガイド含む）を確認してから再試行する。
+
+詳細（各パターン詳細例・コード例・違反時対応）: docs/reference/implementation-constraints-guide.md

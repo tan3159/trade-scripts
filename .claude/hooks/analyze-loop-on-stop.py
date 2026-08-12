@@ -10,6 +10,9 @@ Issue #827・#1055。
     をバックグラウンド実行する
   - 実行後は ~/.cache/loop-analysis-last-run のタイムスタンプを更新する
   - hook 自体は常に exit 0（セッション終了をブロックしない）
+  - projects/py/tidd_tools を含む本体リポジトリでは `uv run --project` を使い、
+    consumer 環境では uvx ゼロインストール実行方式（`_lib/tidd_uvx.build_uvx_tidd_cmd`）
+    にフォールバックする（Issue #3087）
 
 環境変数:
   ANALYZE_SCRIPT       テスト用スタブ実行可能パス（未設定時は uv 経由で
@@ -26,72 +29,15 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import is_hook_enabled  # noqa: E402
-
-
-def _read_stdin_drain() -> None:
-    """stdin から payload を読み Stop schema で validate する（Issue #1364）.
-
-    従来 1 行だけ読み捨てていたが、payload 全体を読んで schema mismatch を検出できるようにした。
-    副作用処理を伴う Stop hook のため、schema mismatch は WARN log 化して exit 2 は避ける。
-    """
-    if sys.stdin.isatty():
-        return
-    try:
-        raw = sys.stdin.read()
-    except (OSError, ValueError):
-        return
-    raw = raw.strip()
-    if not raw:
-        return
-    try:
-        import json as _json
-
-        data = _json.loads(raw)
-    except _json.JSONDecodeError:
-        return
-    if not isinstance(data, dict):
-        return
-    # Issue #1364: Stop schema で validate（不一致は WARN log のみ）
-    _lib_dir = Path(__file__).resolve().parent / "_lib"
-    if str(_lib_dir) not in sys.path:
-        sys.path.insert(0, str(_lib_dir))
-    try:
-        from validate_payload import (  # type: ignore[import-not-found]
-            PayloadValidationError,
-            validate_payload,
-        )
-
-        validate_payload(data, "Stop")
-    except ImportError:
-        pass
-    except PayloadValidationError as exc:
-        sys.stderr.write(f"analyze-loop-on-stop.py: WARN: Stop schema mismatch: {exc}\n")
-
-
-def _git_toplevel() -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    out = result.stdout.strip()
-    return out or None
-
+from _lib.git_helpers import git_toplevel
+from _lib.hook_io import is_hook_enabled, read_stop_hook_input
+from _lib.tidd_uvx import build_uvx_tidd_cmd
 
 _NUM_RE = re.compile(r"^[1-9][0-9]*$")
 _DIGITS_RE = re.compile(r"^[0-9]+$")
@@ -102,11 +48,15 @@ def main() -> int:
     if not is_hook_enabled("analyze-loop-on-stop"):
         return 0
 
-    _read_stdin_drain()
+    # Issue #2957: stdin 読み取りを hook_io.read_stop_hook_input へ集約
+    # （isatty 対応・Stop schema 不一致は WARN のみで exit しない）。
+    # payload の内容自体は使わないため drain のみ。
+    read_stop_hook_input()
 
     home = Path.home()
     last_run_file = Path(
-        os.environ.get("LAST_RUN_FILE") or str(home / ".cache" / "loop-analysis-last-run")
+        os.environ.get("LAST_RUN_FILE")
+        or str(home / ".cache" / "loop-analysis-last-run")
     )
     log_dir = Path(os.environ.get("LOG_DIR") or str(home / ".cache" / "loop-error-log"))
 
@@ -119,7 +69,7 @@ def main() -> int:
     if analyze_script:
         use_py_module = False
     else:
-        repo_root = _git_toplevel()
+        repo_root = git_toplevel(timeout=5)
         if not repo_root:
             return 0
         use_py_module = True
@@ -166,21 +116,20 @@ def main() -> int:
     except OSError:
         pass
 
+    # uvx フォールバック経路（consumer 環境）を踏んだかどうかを覚えておく。
+    # Scenario 2（#3087）の Then 句「標準エラーに "uvx" または "network" を含む
+    # エラーメッセージを出力する」を通常 hook 実行パスでも満たすため、uvx 経路の
+    # 場合は stderr を親プロセスへパススルーして失敗を可視化する必要がある。
+    used_uvx_fallback = False
+
     if use_py_module and repo_root:
-        # entry point 経由（Phase 5 の tidd_tools git+https 配布で `tidd` が PATH に入る consumer 用）
-        # を優先し、無ければ ai-dev-handbook 本体で使う `uv run --project` にフォールバックする。
-        tidd_bin = shutil.which("tidd")
+        # 上流リポジトリ本体（projects/py/tidd_tools が存在する）では引き続き
+        # `uv run --project` を使い consumer 化しない（Issue #3087 やること4）。
+        # 本体以外（copier 配布された consumer 環境）では uvx ゼロインストール実行方式に
+        # フォールバックする（永続インストール状態を持たない）。
         tidd_tools_project = Path(repo_root) / "projects" / "py" / "tidd_tools"
-        if tidd_bin:
+        if tidd_tools_project.is_dir():
             cmd: list[str] = [
-                tidd_bin,
-                "analyze-loop-errors",
-                "--create-issues",
-                "--days",
-                str(interval_days),
-            ]
-        elif tidd_tools_project.is_dir():
-            cmd = [
                 "uv",
                 "run",
                 "--project",
@@ -194,8 +143,14 @@ def main() -> int:
                 str(interval_days),
             ]
         else:
-            # tidd が入っていない consumer 環境ではスキップ（hook はセッションをブロックしない）
-            return 0
+            uvx_cmd = build_uvx_tidd_cmd(
+                "analyze-loop-errors", "--create-issues", "--days", str(interval_days)
+            )
+            if uvx_cmd is None:
+                # uvx が入っていない consumer 環境ではスキップ（hook はセッションをブロックしない）
+                return 0
+            cmd = uvx_cmd
+            used_uvx_fallback = True
     else:
         cmd = [
             "bash",
@@ -208,16 +163,34 @@ def main() -> int:
     foreground = os.environ.get("LOOP_ANALYSIS_FOREGROUND", "0") == "1"
     try:
         if foreground:
-            subprocess.run(
+            # 同期実行時（テスト用）は stderr を捕捉し失敗時に転送する。
+            # consumer 環境で uvx 経由の tidd 解決がネットワーク到達不可等で失敗した場合、
+            # 標準エラーにエラーメッセージを出力する（Issue #3087 Scenario 2）。
+            result = subprocess.run(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
                 check=False,
                 timeout=600,
+                text=True,
+            )
+            if result.returncode != 0 and result.stderr:
+                sys.stderr.write(result.stderr)
+        elif used_uvx_fallback:
+            # consumer 環境（uvx フォールバック経路）はネットワーク到達不可時の可視化が
+            # マージゲート（Issue #3087 Scenario 2）となるため、バックグラウンド起動でも
+            # stderr を親プロセスに継承させて失敗メッセージを流す。
+            # stdout は静音化を維持（週次実行の成功出力でセッションを汚さない）。
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=None,  # 親プロセスの stderr を継承
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
             )
         else:
-            # nohup 相当: 親と切り離してバックグラウンド起動
+            # nohup 相当: 親と切り離してバックグラウンド起動（本体 uv run --project 経路）
             subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,

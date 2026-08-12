@@ -1,0 +1,46 @@
+# .mise.toml.example — mise 用の環境変数設定テンプレート
+#
+# 使い方:
+#   cp .mise.toml.example .mise.toml
+#   mise trust
+#
+# ⚠️  .mise.toml は .gitignore 済みです。実際のトークン・API キーを書いても
+#     コミットされませんが、画面共有・ログ・AI エージェントへの貼り付けには
+#     注意してください（CLAUDE.md セキュリティ原則参照）。
+# ⚠️  このファイル（.mise.toml.example）には実際のトークン・API キーを書かないでください。
+#     プレースホルダのみを記載します。
+
+[env]
+# publish 成果物の公開先グループメール（/publish skill が使用・Google Drive 共有先）
+PUBLISH_DEFAULT_SCOPE = "tan3159@gmail.com"
+
+# ─────────────────────────────────────────────────────────────
+# 実際のトークン・API キーを直接書き込む。
+# セッションを開くたびに mise が自動で export する（mise trust 後）。
+# ─────────────────────────────────────────────────────────────
+
+# GitHub App（ai-review 用）
+# APP_ID = "123456"
+# INSTALLATION_ID = "78901234"
+# GH_TOKEN = "github_pat_xxx..."
+
+# GitHub App 秘密鍵（content か path のどちらか一方）
+# PRIVATE_KEY_CONTENT = """-----BEGIN RSA PRIVATE KEY-----
+# MIIEowIBAAK...（実際の秘密鍵の内容）
+# -----END RSA PRIVATE KEY-----"""
+# または
+# PRIVATE_KEY_PATH = "/home/user/.config/ai-reviewer/private-key.pem"
+
+# agy 用（Google Cloud Application Credentials）
+# GOOGLE_APPLICATION_CREDENTIALS_JSON = '{"type":"service_account",...}'
+
+# codex 用（OpenAI）
+# OPENAI_API_KEY = "sk-proj-xxx..."
+
+# Anthropic（直接 API 呼び出しが必要な場合）
+# ANTHROPIC_API_KEY = "sk-ant-xxx..."
+
+# CircleCI
+# CIRCLECI_TOKEN = "token_xxx..."
+
+# 詳細: docs/setup/secrets-management.md

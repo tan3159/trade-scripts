@@ -6,6 +6,9 @@
 # 導入手順（GitHub App install 等）: docs/setup/copier-workflow-adoption.md
 # yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 language: "ja-JP"
+# tone_instructions: レビューコメント・要約・説明文はすべて日本語で書く（#2413）
+# language: "ja-JP" だけでは UI 固定文言が英語混在するため tone_instructions で強化
+tone_instructions: "レビューコメント・Walkthrough 要約・変更一覧・説明文はすべて日本語で書いてください。英語の見出しや説明文も日本語に翻訳して出力してください。"
 
 reviews:
   profile: "chill"

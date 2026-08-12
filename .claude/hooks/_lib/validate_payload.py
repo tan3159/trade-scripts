@@ -59,6 +59,19 @@ def _check_type(value: Any, expected_type: str) -> bool:
     return True  # 未知の型は通す（前方互換性）
 
 
+def _matches_type(value: Any, expected_type: Any) -> bool:
+    """schema の ``type`` フィールドと value を照合する（単一文字列 or 配列を許容・Issue #2905）.
+
+    mcp tool（例: ``mcp__github__create_pull_request``）の ``tool_response`` は
+    array で返るため、schema 側で ``["object", "array"]`` のような複数型許容を表現する際に使う。
+    """
+    if isinstance(expected_type, list):
+        return any(_check_type(value, t) for t in expected_type if isinstance(t, str))
+    if isinstance(expected_type, str):
+        return _check_type(value, expected_type)
+    return True  # 未知の type 表現は通す（前方互換性）
+
+
 def validate_payload(payload: dict[str, Any], hook_name: str) -> None:
     """payload を hook_name.json schema で検証する.
 
@@ -93,7 +106,7 @@ def validate_payload(payload: dict[str, Any], hook_name: str) -> None:
         if key not in payload:
             continue
         expected_type = prop_schema.get("type")
-        if isinstance(expected_type, str) and not _check_type(payload[key], expected_type):
+        if expected_type is not None and not _matches_type(payload[key], expected_type):
             raise PayloadValidationError(
                 f"Hook payload schema validation failed: '{key}' expected type {expected_type}, "
                 f"got {type(payload[key]).__name__}"

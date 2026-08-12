@@ -27,28 +27,32 @@ Issue #1764, #2112, #2151
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib.hook_io import (  # type: ignore[import-not-found]
+    get_file_path,
+    get_new_content,
+    is_file_edit_tool,
+)
+
 
 def _find_tidd_tools_src() -> Path | None:
-    """リポジトリルートを git rev-parse で探し tidd_tools src ディレクトリを返す."""
-    import subprocess
+    """リポジトリルートを git rev-parse で探し tidd_tools src ディレクトリを返す.
 
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        repo_root = Path(result.stdout.strip())
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    Issue #2958: toplevel 解決は `_lib/git_helpers.py` の `git_toplevel()` に委譲する
+    （on-stop.py と同じ、関数ローカルで `_lib` を sys.path 追加してから bare import する慣習）。
+    """
+    _lib_dir = Path(__file__).resolve().parent / "_lib"
+    if str(_lib_dir) not in sys.path:
+        sys.path.insert(0, str(_lib_dir))
+    from git_helpers import git_toplevel  # type: ignore[import-not-found]
+
+    repo_root_str = git_toplevel(timeout=5)
+    if repo_root_str is None:
         return None
+    repo_root = Path(repo_root_str)
 
     src = repo_root / "projects" / "py" / "tidd_tools" / "src"
     if src.is_dir():
@@ -68,14 +72,17 @@ def _add_tidd_tools_to_path() -> bool:
 
 
 def _read_input() -> dict:
-    """Claude Code が hook に渡す JSON を stdin から読み取る."""
+    """Claude Code が hook に渡す JSON を stdin から読み取る（Issue #2957: hook_io.read_hook_input へ集約）."""
+    _lib_dir = Path(__file__).resolve().parent / "_lib"
+    if str(_lib_dir) not in sys.path:
+        sys.path.insert(0, str(_lib_dir))
     try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, OSError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return data
+        from hook_io import (  # type: ignore[import-not-found]
+            read_hook_input as _read_hook_input,
+        )
+    except ImportError:
+        return {}  # hook_io が存在しない場合は無視（前方互換）
+    return _read_hook_input(hook_name="PreToolUse")
 
 
 def _is_skill_md(file_path: str) -> bool:
@@ -114,6 +121,8 @@ def _get_new_content(payload: dict) -> str | None:
     old_string → new_string を適用した合成後の全文を返す（Issue #1971）。
     ディスクにファイルがない / old_string が見つからない場合は安全側として
     new_string 単体を返す（挙動を変えない）。
+    Codex の apply_patch は共通ヘルパー `hook_io.get_new_content()` が
+    patch の追加行（+ 行）を返す（Issue #3221）。
     """
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
@@ -131,9 +140,10 @@ def _get_new_content(payload: dict) -> str | None:
             value = tool_input.get(key)
             if isinstance(value, str):
                 return value
-        return None
+        # Codex apply_patch: 共通ヘルパーへ委譲（content / new_string が存在しない場合）
+        return get_new_content(payload)
 
-    raw_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    raw_path = get_file_path(payload)
     old_string = tool_input.get("old_string")
     replace_all = bool(tool_input.get("replace_all", False))
 
@@ -164,11 +174,10 @@ def _read_from_disk(file_path: str) -> str | None:
 def _main() -> int:
     payload = _read_input()
     tool_name = str(payload.get("tool_name", ""))
-    if tool_name not in {"Edit", "Write"}:
+    if not is_file_edit_tool(tool_name):
         return 0
 
-    tool_input = payload.get("tool_input", {}) or {}
-    raw_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    raw_path = get_file_path(payload)
     if not raw_path:
         return 0
 
@@ -191,11 +200,17 @@ def _main() -> int:
     _add_tidd_tools_to_path()
     checker = None
     try:
-        from tidd_tools import skill_checker as checker  # type: ignore[import-not-found]
+        from tidd_tools import (
+            skill_checker as tidd_skill_checker,  # type: ignore[import-not-found, import-untyped]
+        )
+
+        checker = tidd_skill_checker
     except ImportError:
         # フォールバック: _lib/skill_lint.py（stdlib のみ・copier 配布先用・Issue #2151）
         try:
-            import skill_lint as checker  # type: ignore[import-not-found]
+            import skill_lint as tidd_skill_lint  # type: ignore[import-not-found]
+
+            checker = tidd_skill_lint
         except ImportError:
             pass
 
