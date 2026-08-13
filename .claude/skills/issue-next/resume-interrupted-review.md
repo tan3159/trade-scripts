@@ -1,9 +1,11 @@
 # STEP 1.7: 既存 PR / 中断レビュー検知（Issue #1232）
 
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
+
 `/issue-next` の STEP 1.7 詳細フロー。
 `closes #<N>` を含む open PR が存在する場合のみ読む。存在しない場合は STEP 2 へ進む。
 
-STEP 2（ブランチ作成）に進む前に、`closes #<N>` を含むオープン PR が既に存在するかを確認する。
+STEP 2（実装・issue-implementer 委譲）に進む前に、`closes #<N>` を含むオープン PR が既に存在するかを確認する。
 存在する場合は「新しいブランチ + 新しい PR」を作らず、既存 PR のレビュー状態に応じて分岐する。
 
 これは前セッションで PR 作成後・AI review 完了前にプロセスが死亡した場合の孤児 PR
@@ -16,10 +18,7 @@ STEP 2（ブランチ作成）に進む前に、`closes #<N>` を含むオープ
 `mcp__github__list_pull_requests({owner, repo, state: "open"})` で全 open PR を取得し、
 返り値の各 PR の `body` フィールドに `closes #<N>` を含むものを filter する。
 
-```bash
-# shell 実行時のリファレンス
-gh pr list --state open --search "closes #<N> in:body" --json number,title,headRefName -q '.[0].number'
-```
+filter を適用した後、マッチする PR の `number` フィールドを取得する。
 
 マッチする PR が無い（空文字が返る）場合は STEP 2 へ進む（通常の初回実装フロー）。
 
@@ -35,7 +34,7 @@ Linux/WSL・macOS・Windows で `platformdirs` が返す OS 別のキャッシ�
 | 状態 | 条件 | 分岐先 |
 |------|------|--------|
 | `NO_CACHE` | cache dir が存在しない or 中身が空 | 通常の初回レビューフロー（STEP 5 で `tidd ai-review <PR> 1` を同期実行） |
-| `COMPLETED` | `verdict` センチネルファイルあり or `timing.json` のいずれかの行に `"verdict"` エントリあり | 現行フローに従う（人間マージ待ちなら報告して終了、REQUEST_CHANGES なら STEP 3 に戻り修正） |
+| `COMPLETED` | `verdict` センチネルファイルあり or `timing.json` のいずれかの行に `"verdict"` エントリあり | 現行フローに従う（人間マージ待ちなら報告して終了、REQUEST_CHANGES なら STEP 5 のリトライループ（issue-fixer 委譲）に従い修正） |
 | `INTERRUPTED` | 何らかのキャッシュはあるが `verdict` 観測手段（センチネル or timing.json）が無い | **中断検知**。同 PR で `tidd ai-review <PR> <試行回数>` を **同期再実行**して verdict を回収する |
 
 ### 3. 中断レビュー再開時のブランチ切り替え

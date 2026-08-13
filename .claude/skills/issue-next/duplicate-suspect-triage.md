@@ -1,46 +1,6 @@
 # STEP 1.5.5: duplicate-suspect 精査（Phase 2・Issue #1307）
 
-`/issue-next` の STEP 1.5.5 詳細フロー。
-`duplicate-suspect` ラベルが付いている Issue のみ読む。ラベルがない場合は STEP 1.7 へ進む。
-
-## 目次
-
-- [a. `duplicate-suspect` ラベル検出](#a-duplicate-suspect-ラベル検出)
-- [b. 相方 Issue の特定](#b-相方-issue-の特定)
-- [c. duplicate-detector subagent で厳密判定](#c-duplicate-detector-subagent-で厳密判定)
-- [d. 判定結果に応じた分岐](#d-判定結果に応じた分岐)
-- [冪等性](#冪等性)
-- [プロンプトインジェクション対策](#プロンプトインジェクション対策)
-
-**Issue #1306 で自動付与された `duplicate-suspect` ラベル**が着手対象 Issue に付いている場合、
-着手前に **意味的重複の厳密判定** を実施する（`/detect-duplicates` skill は recall 優先で false positive を含むため）。
-
-## a. `duplicate-suspect` ラベル検出
-
-`mcp__github__get_issue({owner, repo, issue_number: <N>})` の返り値 `labels[].name` に
-`"duplicate-suspect"` が含まれるか確認する。
-
-含まれない → duplicate なしとして STEP 1.7 へ進む。
-含まれる → 以下の精査フローに入る。
-
-## b. 相方 Issue の特定
-
-Issue #<N> に投稿された `/detect-duplicates` の bot コメントから相方 Issue 番号を抽出する。
-
-- `mcp__github__get_issue({...})` の返り値からコメント本文を取得（配列で投稿順）
-- `body` フィールドに `"重複疑い: #"` を含むコメントを filter
-- 最新（配列末尾）のコメントを採用
-- 本文から `重複疑い: #<M>` パターンで相方番号 `<M>` を抽出
-
-## c. duplicate-detector subagent で厳密判定
-
-事前に両 Issue の full body を取得する:
-
-- Issue #<N> データ: `mcp__github__get_issue({owner, repo, issue_number: N})`
-- Issue #<M> データ: `mcp__github__get_issue({owner, repo, issue_number: M})`
-
-```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="duplicate_detector", task_name="duplicate_detector", message=...) に読み替え
   subagent_type="duplicate-detector",
   description="Phase 2 厳密判定 #<N> vs #<M>",
   prompt="Issue #<N> と Issue #<M> の full body を比較して、実質的な重複かを高精度で判定してください。

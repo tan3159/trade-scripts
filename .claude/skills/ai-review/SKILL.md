@@ -1,7 +1,9 @@
 ---
 name: ai-review
-description: PR のコードレビューを agy/codex subprocess で実行し、verdict-extractor subagent で verdict を構造化抽出する（Issue #1303）。Anthropic SDK を直接使わない。tidd ai-review の --continue-with-verdict で後続処理（マージ・タスクチェック等）を委譲する。
+description: PR のコードレビューを tidd ai-review --stop-before-merge で実行し、verdict-extractor subagent で verdict を構造化抽出する（Issue #1303）。Anthropic SDK を直接使わない。tidd ai-review の --continue-with-verdict で後続処理（マージ・タスクチェック等）を委譲する。
 ---
+
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
 
 # /ai-review
 
@@ -12,123 +14,63 @@ description: PR のコードレビューを agy/codex subprocess で実行し、
 を直接呼び出していた（Issue #1243）。Issue #1303 でこれを廃止し、Claude Code の Agent tool
 経由で `verdict-extractor` subagent による構造化抽出に置換した。
 
-## 引数
-
-- `<N>`: レビューする PR 番号（必須）
-- `<ATTEMPT>`: 試行回数（省略時 1）
-
-## 手順
-
-### STEP 1: PR 情報を取得
-
-```bash
-gh pr view <N> --json number,title,body,headRefName,baseRefName
-```
-
-### STEP 2: PR diff を取得
-
-```bash
-gh pr diff <N>
-```
-
-package-lock.json / yarn.lock / uv.lock のブロックを除外する（500KB 超は切り詰める）。
-
-### STEP 3: レビュープロンプトを組み立てて agy で実行
-
-プロンプトは以下の要素で構成する:
+### STEP 1: PR 情報と parser critical 判定を実施
 
 ```
-Activate the code-review-commons skill. Skip security vulnerability findings — those are
-handled separately by gemini-cli-security.
-
-## Severity classification override (Cloudflare-style, evidence-based)
-
-Before assigning any severity, follow this chain of thought:
-1. Identify the exact behavior the code produces under real runtime conditions.
-2. Ask: does this CURRENTLY cause an outage, data loss, or wrong observable outcome?
-3. If yes, quote the diff line (file:line). Then pick severity.
-4. If no (theoretical concern), pick MEDIUM or LOW.
-
-Severity definitions:
-- CRITICAL: Will cause an outage, data loss, or is exploitable in production.
-- HIGH: Causes a wrong observable outcome under normal production usage.
-- MEDIUM: Maintainability / readability / non-blocking improvement.
-- LOW: Nit / style / suggestion.
-
-Evidence requirement: Never emit HIGH or CRITICAL without citing a specific diff line.
-
----
-
-以下の PR のコードをレビューし、最後に VERDICT: APPROVE または VERDICT: REQUEST_CHANGES
-（および [CRITICAL] / [HIGH] 等の指摘事項）を出力してください。
-
-PR #<N>: <title>
----
-<PR diff>
+mcp__github__get_pull_request({owner, repo, pull_number: <N>})
 ```
 
-実行:
-```bash
-agy --prompt "<プロンプト + diff>" 2>&1
+続いて変更ファイル一覧を取得し、parser critical PR かどうかを判定する:
+
+```
+mcp__github__list_pull_request_files({owner, repo, pull_number: <N>})
 ```
 
-**CRITICAL（Issue #2029）: `tee` 禁止。レビュー本文のみを `/tmp/agent-review-<N>.md` に保存する。**
-`agy ... | tee /tmp/agent-review-<N>.md` や `codex exec ... | tee ...` のように backend の
-生出力をそのままファイルに保存してはならない。codex の生セッションログ（161KB 実例: PR #2027）が
-丸ごと保存され、`--continue-with-verdict` がそれを PR コメントとして投稿して破損する。
-backend 出力からレビュー本文（サマリー・指摘事項・VERDICT 行）だけを抽出し、STEP 4 で
-Write ツールにより保存すること。
-
-agy が利用不可（QUOTA_EXCEEDED・未インストール）の場合は codex にフォールバック:
-```bash
-codex exec -o /tmp/agent-review-<N>-codex-last.txt "<プロンプト + diff>"
-```
-`-o`（`--output-last-message`）はエージェントの最終メッセージのみを指定ファイルへ書き出すため、
-上記の生セッションログ混入を避けやすい（廃止済み `--quiet` フラグは使わない）。
-
-どちらも利用不可の場合は exit 3 を返す。
-
-### STEP 3.5: parser critical PR 判定（§1-3-3）
-
-STEP 2 で取得した diff に以下のパスが含まれるか確認する:
-
-- `tidd_tools/ai_review/**`
+以下のパスが含まれるか確認する:
+- `tidd_tools/ai_review/`（サブディレクトリ含む）
 - `.claude/hooks/validate-issue.py`
 - `.claude/hooks/require-issue.py`
 
 **いずれかが含まれる場合、この PR は parser critical PR**（以下 `_is_parser_critical=true` と呼ぶ）。
-verdict 確定後の STEP 5.5 で secondary consensus チェックを実行する。
+verdict 確定後の STEP 3 で secondary consensus チェックを実行する。
 
-`_is_parser_critical` の値にかかわらず STEP 4 に進む。
+### STEP 2: tidd ai-review --stop-before-merge でレビューを実行
 
-### STEP 4: レビュー本文と backend 名を保存
+**旧 STEP 2-4（手書き diff 取得・プロンプト組み立て・agy/codex 実行・本文保存）を廃止。**
+代わりに `tidd ai-review --stop-before-merge` の単一コマンドを実行する（Issue #2645）。
 
-Write ツールでレビュー本文を保存する（`--continue-with-verdict` が読む）:
-
-```
-保存先: /tmp/agent-review-<N>.md
-```
-
-**注記（Issue #2029）: `tee` を使わないこと。** STEP 3 の実行結果をパイプで直接保存すると
-生セッションログが混入する。必ず Write ツールでレビュー本文のみ（サマリー・指摘事項・
-VERDICT 行）を保存する。なお `--continue-with-verdict` 側にも GitHub コメント上限
-（65536 文字）を超える body を PR コメントに投稿しないガードがある（二重ガード）。
-
-backend 名を記録:
 ```bash
-mkdir -p "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>"
-printf 'agy\n' > "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/backend-name"
+tidd ai-review --stop-before-merge <N>
 ```
 
-### STEP 5: verdict-extractor subagent で verdict を構造化抽出
+**終了コードの解釈:**
+- 10 → APPROVE（verdict 確定。レビュー本文が `$AGENT_REVIEW_DIR/agent-review-<N>.md` に保存済み）
+- 11 → REQUEST_CHANGES（verdict 確定。レビュー本文が保存済み）
+- 3 → 全バックエンド利用不可（exit 3 のまま終了する）
+- その他 → エラー（人間にエスカレーション）
 
-Agent tool を以下のように呼ぶ:
+**exit 3 の場合:** `issue-next` SKILL.md 「exit 3 フォールバック」節に従って fallback-review subagent を起動する。
+
+**注記（Issue #2029）:** `tee` 禁止・生セッションログ混入は `tidd ai-review` 内部で防護済み。
+`backend 名の記録` / `timing.json 書き込み` / `プロンプトの出力フォーマット` も Python 経路で担保される。
+
+レビュー本文は `$AGENT_REVIEW_DIR/agent-review-<N>.md`（環境変数未設定時は `/tmp/agent-review-<N>.md`）に保存される。
+
+### STEP 3: verdict-extractor subagent で verdict を構造化抽出
+
+```bash
+cat "$AGENT_REVIEW_DIR/agent-review-<N>.md"
+# または
+cat /tmp/agent-review-<N>.md
+```
+
+で保存済みレビュー本文を読み込み、Agent tool を以下のように呼ぶ:
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="verdict_extractor", task_name="verdict_extractor", message=...) に読み替え
   subagent_type="verdict-extractor",
   description="PR #<N> の verdict 抽出",
-  prompt="以下のレビュー出力から VERDICT を構造化して返してください。\n\n<STEP 3 のレビュー本文>"
+  prompt="以下のレビュー出力から VERDICT を構造化して返してください。\n\n<レビュー本文>"
 )
 ```
 
@@ -144,15 +86,15 @@ subagent は次の JSON を返す:
 
 `confidence: "low"` の場合は VERDICT ログに注記する。
 
-### STEP 5.5: parser critical PR の secondary consensus チェック
+### STEP 3.5: parser critical PR の secondary consensus チェック
 
-`_is_parser_critical=true` かつ STEP 5 の verdict が `APPROVE` の場合のみ実行する。
-`_is_parser_critical=false` または verdict が `REQUEST_CHANGES` / `ESCALATE` の場合はスキップして STEP 6 へ進む。
+`_is_parser_critical=true` かつ STEP 3 の verdict が `APPROVE` の場合のみ実行する。
+`_is_parser_critical=false` または verdict が `REQUEST_CHANGES` / `ESCALATE` の場合はスキップして STEP 4 へ進む。
 
-**secondary レビューより先に primary review コメントを投稿する（Issue #2314）:**
+**secondary レビューより先に primary review コメントを投稿する（Issue #2314・#2523）:**
 
-STEP 6 の `--continue-with-verdict` は primary review コメントを内部で投稿するが、
-STEP 5.5 は STEP 6 より前に実行されるため、そのまま進むと secondary review コメント・
+STEP 4 の `--continue-with-verdict` は primary review コメントを内部で投稿するが、
+STEP 3.5 は STEP 4 より前に実行されるため、そのまま進むと secondary review コメント・
 consensus コメントが primary review コメントより先に GitHub 上へ投稿されてしまう
 （投稿順序が primary → secondary → consensus からずれる）。secondary レビューを実行する前に
 以下を実行し、primary review コメントを先に投稿しておく:
@@ -161,13 +103,20 @@ consensus コメントが primary review コメントより先に GitHub 上へ�
 tidd ai-review --post-primary-review <N>
 ```
 
-投稿済みフラグ（`cwv-approved`）が立つため、STEP 6 の `--continue-with-verdict APPROVE <N>` は
-コメントを再投稿せずマージ判定へ直接進む。
+**重要（Issue #2523）:** この `--post-primary-review` は PR コメントのみで投稿し、
+正式レビューは残さない（`as_formal_review=False`）。
+consensus 確定前の中間コメントに正式レビューを残すと、secondary が後で REQUEST_CHANGES を
+返してエスカレーションになった際も bot の「Approved」正式レビューが GitHub Reviewers 欄に
+残ったままになる矛盾を防ぐため。正式な approve は STEP 4 の
+`--continue-with-verdict APPROVE` 実行時（consensus 確定後）にのみ発行される。
+
+投稿済みフラグ（`cwv-approved`）が立つため、STEP 4 の `--continue-with-verdict APPROVE <N>` は
+コメントを再投稿せずにマージ判定へ直接進み、その時点で正式 `gh pr review --approve` を発行する。
 
 **まず primary backend を確認する:**
 
 ```bash
-cat "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/backend-name"
+cat "${HOME}/.cache/tidd/ai-reviewer/pr-<N>/backend-name"
 # → "agy" / "codex" なら非 Claude backend（multi-backend 可）
 # → "claude-code" なら Claude fallback（同一 backend → multi-backend 不可）
 ```
@@ -176,8 +125,11 @@ cat "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/backend-name"
 同一 backend 系統のため multi-backend consensus を満たせない。人間にエスカレーションする:
 
 ```bash
-gh pr comment <N> --body "parser critical PR のため multi-backend consensus が必要ですが、primary backend（agy/codex）が利用不可でした。人間レビューが必要です。"
-gh pr edit <N> --add-label "needs-human-merge"
+# bot アカウントで投稿する（Issue #2656）
+# --post-comment が exit 1 を返した場合も再投稿を行わない（exit 2 でエスカレーション）
+tidd ai-review --post-comment <N> "parser critical PR のため multi-backend consensus が必要ですが、primary backend（agy/codex）が利用不可でした。人間レビューが必要です。" --no-reviewer-footer
+# update_pull_request は labels を受け付けないため gh api でラベル追加する
+gh api -X POST /repos/{owner}/{repo}/issues/<N>/labels --input - <<< '{"labels":["needs-human-merge"]}'
 exit 2
 ```
 
@@ -185,15 +137,16 @@ exit 2
 Agent tool で secondary レビューを実行する:
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="ai_reviewer", task_name="ai_reviewer", message=...) に読み替え
   subagent_type="ai-reviewer",
   description="PR #<N> secondary consensus レビュー",
-  prompt="parser critical PR #<N> を独立にレビューしてください。\n\n変更ファイル:\n<gh pr diff <N> --name-only の出力>\n\n差分:\n<gh pr diff <N> の出力（uv.lock 等 lockfile 除外）>"
+  prompt="parser critical PR #<N> を独立にレビューしてください。\n\n変更ファイル:\n<mcp__github__list_pull_request_files の filename 一覧>\n\n差分は提供しません。変更ファイルは Read / Grep / Glob で直接読んでください。現在の作業ディレクトリは PR ブランチの worktree であり、Read したファイルは PR 適用後の内容です。"
 )
 ```
 
 secondary subagent（`.claude/agents/ai-reviewer.md`）は primary review 本文を参照せず、
-コードを独立に読んで判定する（Read / Grep / Glob ツールで変更ファイルを直接参照）。
+コードを独立に読んで判定する（Read / Grep / Glob ツールで変更ファイルを直接参照。
+実行 CWD は PR ブランチの worktree のため、Read したファイルは PR 適用後の内容である）。
 
 **⚠️ CRITICAL（Issue #1410）: Claude inline fallback 禁止**
 
@@ -206,8 +159,11 @@ multi-backend consensus の設計（`#1290`）が実質的に崩れる（同一�
 **subagent 起動不能を検知したら以下を実行:**
 
 ```bash
-gh pr comment <N> --body "secondary consensus 不能（ai-reviewer subagent 起動不可）。手動確認が必要です。"
-gh pr edit <N> --add-label "needs-human-merge"
+# bot アカウントで投稿する（Issue #2656）
+# --post-comment が exit 1 を返した場合も再投稿を行わない（exit 2 でエスカレーション）
+tidd ai-review --post-comment <N> "secondary consensus 不能（ai-reviewer subagent 起動不可）。手動確認が必要です。" --no-reviewer-footer
+# update_pull_request は labels を受け付けないため gh api でラベル追加する
+gh api -X POST /repos/{owner}/{repo}/issues/<N>/labels --input - <<< '{"labels":["needs-human-merge"]}'
 exit 2
 ```
 
@@ -225,10 +181,14 @@ exit 2
 
 集約タリー（`consensus: 2/2 APPROVE` 等）のみでは secondary が実際に何を検証してどう判断したかが
 事後に確認できない（consensus.json にもメタデータしか残らないため）。consensus 判定コメントを
-投稿する前に、secondary の判定内容（verdict・issues・rationale）を PR コメントとして必ず投稿する:
+投稿する前に、secondary の判定内容（verdict・issues・rationale）を PR コメントとして必ず投稿する。
+
+**フッターには secondary backend 名（`ai-reviewer subagent`）を使うこと（Issue #2660）。**
+`tidd ai-review --post-comment` に `--reviewer "ai-reviewer subagent"` を渡すことで
+primary backend 名（`STATE_DIR/backend-name`）を誤ってフッターに使う問題を防ぐ:
 
 ```bash
-gh pr comment <N> --body "$(cat <<'EOF'
+tidd ai-review --post-comment <N> "$(cat <<'EOF'
 ## secondary レビュー（ai-reviewer subagent・consensus 用）
 
 **verdict:** <subagent が返した verdict>
@@ -238,7 +198,7 @@ gh pr comment <N> --body "$(cat <<'EOF'
 
 **rationale:** <subagent が返した rationale>
 EOF
-)"
+)" --reviewer "ai-reviewer subagent"
 ```
 
 **consensus 実行の観測可能な記録（監査可能性の担保）:**
@@ -248,12 +208,12 @@ EOF
 （メタデータのみだった従来スキーマから監査可能な内容へ拡張・Issue #2079）:
 
 ```bash
-mkdir -p "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>"
-cat > "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/consensus.json" <<EOF
+mkdir -p "${HOME}/.cache/tidd/ai-reviewer/pr-<N>"
+cat > "${HOME}/.cache/tidd/ai-reviewer/pr-<N>/consensus.json" <<EOF
 {
   "secondary_backend": "ai-reviewer-subagent",
   "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "primary_backend": "$(cat ${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/backend-name)",
+  "primary_backend": "$(cat ${HOME}/.cache/tidd/ai-reviewer/pr-<N>/backend-name)",
   "pr_num": "<N>",
   "verdict": "<subagent が返した verdict>",
   "issues": <subagent が返した issues 配列>,
@@ -262,30 +222,39 @@ cat > "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<N>/consensus.json" <<EOF
 EOF
 ```
 
-後日 `~/.cache/ai-dev-handbook/ai-reviewer/pr-*/consensus.json` を集計すれば、どの parser critical PR で
+後日 `~/.cache/tidd/ai-reviewer/pr-*/consensus.json` を集計すれば、どの parser critical PR で
 subagent 経由の consensus が実施されたか、および secondary が何を判定したかを監査できる。
 ファイルが無い parser critical PR は「consensus 未実施」として扱う。
 
-**consensus 判定:**
+**consensus 判定（Issue #2657 でリトライ方式に更新）:**
 
 | primary backend | primary verdict | secondary | 最終判定 |
 |---|---|---|---|
-| agy / codex | APPROVE | APPROVE | STEP 6 へ（コメント: `consensus: 2/2 APPROVE`） |
-| agy / codex | APPROVE | REQUEST_CHANGES | exit 2（コメント: `consensus: 1/2 APPROVE, needs human review` + ラベル） |
+| agy / codex | APPROVE | APPROVE | STEP 4 へ（コメント: `consensus: 2/2 APPROVE`） |
+| agy / codex | APPROVE | REQUEST_CHANGES（1 回目） | リトライ継続（exit 1・`needs-human-merge` ラベル付与なし）|
+| agy / codex | APPROVE | REQUEST_CHANGES（2 回目・同一指摘） | exit 2（コメント + `needs-human-merge` ラベル付与）|
+| agy / codex | APPROVE | REQUEST_CHANGES（2 回目・異なる指摘） | リトライ継続（exit 1）|
 | claude-code | APPROVE | — | exit 2（同一 backend → 人間エスカレーション） |
 
-```bash
-# consensus APPROVE の場合（agy/codex primary + ai-reviewer APPROVE）
-gh pr comment <N> --body "consensus: 2/2 APPROVE"
-# → STEP 6 へ進む
+secondary consensus の判定は `tidd ai-review --consensus-verdict` サブコマンドで実行する（Issue #2657）:
 
-# consensus 不一致の場合
-gh pr comment <N> --body "consensus: 1/2 APPROVE, needs human review"
-gh pr edit <N> --add-label "needs-human-merge"
-exit 2
+```bash
+# consensus 判定の実行（secondary issues は JSON 配列文字列で渡す）
+SECONDARY_ISSUES='["[CRITICAL] core.py::handle_sha_cache_hit() が stop_before_merge を受け取らない"]'
+tidd ai-review --consensus-verdict <N> REQUEST_CHANGES "$SECONDARY_ISSUES" <ATTEMPT>
+# exit 0: secondary APPROVE（consensus 通過）→ STEP 4 へ
+# exit 1: リトライ継続（needs-human-merge ラベル付与なし）
+#   1 回目不一致の出力例: "consensus 不一致（1 回目）: リトライします"
+# exit 2: エスカレーション（needs-human-merge ラベル付与）
+#   2 回連続同一指摘の例: "consensus: 1/2 APPROVE, needs human review（同じ secondary 指摘が 2 回連続）"
+
+# consensus APPROVE の場合（agy/codex primary + ai-reviewer APPROVE）
+# consensus 判定コメントは特定 backend に紐づかないため --no-reviewer-footer を使う（Issue #2660）
+tidd ai-review --post-comment <N> "consensus: 2/2 APPROVE" --no-reviewer-footer
+# → STEP 4 へ進む
 ```
 
-### STEP 6: --continue-with-verdict で後続処理を実行
+### STEP 4: --continue-with-verdict で後続処理を実行
 
 verdict に応じて:
 
@@ -296,32 +265,18 @@ tidd ai-review \
 
 **ESCALATE の場合:** `--continue-with-verdict` は呼ばず、人間にエスカレーションを報告する。
 
-終了コードの解釈:
-- 0 → APPROVE 自動マージ完了
-- 1 → REQUEST_CHANGES（指摘あり。修正後に再実行）
-- 2 → エスカレーション（PR コメント・通知済み）
-- 4 → 停止条件あり / `[AI確認]` / `[手動]` タスク残り
+STEP 1 で検出し、primary（tidd ai-review --stop-before-merge via STEP 2）と
+secondary（`.claude/agents/ai-reviewer.md`）の両方が APPROVE を返したときにのみ最終 APPROVE とする。
 
-## Anthropic SDK 直接呼び出し禁止（Issue #1281・#1303）
+一方でも REQUEST_CHANGES を返した場合は `tidd ai-review --consensus-verdict` で判定する（Issue #2657）。
+1 回目の不一致はエスカレーションせずリトライを継続し、同一指摘が 2 回連続した場合のみ
+`needs-human-merge` ラベルを付与して exit 2 でエスカレーションする。
 
-本 skill / subagent の実装では **`import anthropic` を使わない。**
-verdict 抽出は `verdict-extractor` subagent（Agent tool）経由で行う。
-`.claude/hooks/ban-anthropic-import.py` が違反を機械強制でブロックする。
-
-## §1-3-3 多 backend 一致（parser critical PR）
-
-parser critical PR（`ai_review/**`・`validate-issue.py`・`require-issue.py` を変更する PR）は
-STEP 3.5 で検出し、primary（agy/codex via STEP 3）と secondary（`.claude/agents/ai-reviewer.md`）
-の両方が APPROVE を返したときにのみ最終 APPROVE とする。
-
-一方でも REQUEST_CHANGES を返した場合は `consensus: N/2 APPROVE, needs human review` を
-PR コメントに投稿し、`needs-human-merge` ラベルを付与して exit 2 で終了する。
-
-詳細は `docs/reference/multi-backend-consensus.md` を参照。
+詳細は `docs/reference/multi-backend-consensus.md` および `docs/reference/review-backends-guide.md` を参照。
 
 ## 関連
 
 - `.claude/agents/verdict-extractor.md` — verdict 抽出 subagent
-- `tidd_tools/ai_review/core.py` — Python の tidd ai-review
+- `tidd_tools/ai_review/core.py` — Python の tidd ai-review（`--stop-before-merge` 実装）
 - `docs/reference/ai-review-skill.md` — 詳細ドキュメント
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針

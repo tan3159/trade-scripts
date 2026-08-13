@@ -46,10 +46,10 @@ consumer（copier 配布先）は操作対象で **2 種類の PAT** を使い�
 
 - 調査・判断の経緯は Issue コメントに残す。コミットに `closes #N` を含める
 - 別問題を発見したら即 Issue 起票（非対話的に `gh issue create`・機密情報は含めない）
-- **エラーに遭遇したら無視せず原因を調査する** — 一時的か恒常的かを判断し、「散発するから仕方ない」で片付けない。恒常的なエラーは `gh issue list` で重複確認の上、再発防止 Issue を起票する
+- **エラーは無視せず原因を調査する** — 一時的か恒常的か判断する。恒常的なら `gh issue list` で重複確認の上、再発防止 Issue を起票する
 - **脆弱性を発見したら Issue 化せずユーザーに直接相談する**
-- **`## 期待する出力例` がある場合**: 内容を改変せず初回スナップショット/テスト期待値として固定する（未記載時は従来フロー）
-- **config.json に `impl-delegation: true` かつ `impl-backend` が設定されている場合**: RED/GREEN 各ステップ + refactor/docs 編集ステップで `tidd propose-step` を使いコード提案を外部 backend（agy/codex/custom）へ委譲できる（`impl-delegation` 無効時またはいずれか未設定時は従来どおり自分で実装。詳細: `docs/reference/propose-step-guide.md`・#3118・#3131・#3132）
+- **`## 期待する出力例` がある場合**: 内容を改変せず初回スナップショット/テスト期待値として固定する
+- **config.json に `impl-delegation: true` かつ `impl-backend` 設定時**: `tidd propose-step` で各ステップのコード提案を外部 backend へ委譲可（無効時は自分で実装）。詳細: `docs/reference/propose-step-guide.md`
 
 ### 完了時
 

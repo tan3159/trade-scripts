@@ -149,9 +149,7 @@ B. <選択肢 2> — <トレードオフ>
 
 # Issue作成ルール
 
-hookとAgy（`/issue-review`）の両方から参照される単一の真実源。
-合格例・source 分類詳細・priority 相対判定・Gherkin 品質基準詳細は
-docs/reference/issue-creation-guide.md を参照。
+hookとAgy（`/issue-review`）が参照する単一の真実源。詳細: docs/reference/issue-creation-guide.md
 
 ---
 
@@ -176,19 +174,18 @@ docs/reference/issue-creation-guide.md を参照。
 |------|---------|
 | `type:` ラベル | `type: feat` / `fix` / `docs` / `refactor` / `ci` / `build` / `research` のいずれか |
 | `priority:` ラベル | `priority: critical` / `high` / `medium` / `low` のいずれか |
-| `source:` ラベル | **🤖 + `type: fix` の場合のみ**: `source: ci` / `rework` / `human-report` / `new-bug` / `spec-change` のいずれか（人間起票は対象外）。5 分類定義・優先順位は docs/reference/issue-creation-guide.md 参照 |
+| `source:` ラベル | **🤖 + `type: fix` のみ**: `ci`/`rework`/`human-report`/`new-bug`/`spec-change` のいずれか（人間起票は対象外・分類詳細は guide 参照） |
 
-priority 相対判定（`/create-issue` skill が分布提示・`issue-writer` subagent が相対評価で選択）の基準は
-docs/reference/issue-creation-guide.md 参照。
+priority 相対判定の基準は docs/reference/issue-creation-guide.md 参照。
 
 ### 粒度・依存関係・ドキュメント更新・方針整合性
 
 | 項目 | 判断基準 |
 |------|---------|
 | 粒度 | 1つのPRで完結するか（複数の関心事が混在していないか） |
-| 依存関係 | 依存Issueの状態を確認してコメントに記載（合否に影響しない）。GitHub ネイティブの `blocked-by` 設定は未解決の依存を自動選定から除外する（#3640） |
-| ドキュメント更新 | 実装に伴う `docs/`・`CLAUDE.md` 等の更新が `## やること` に含まれているか（意味チェック） |
-| 方針整合性 | `docs/decisions/`・`docs/conventions.md`・`CLAUDE.md` の方針と矛盾していないか |
+| 依存関係 | 依存Issueの状態をコメントに記載（合否に影響しない）。`blocked-by` は未解決依存を自動選定から除外（#3640） |
+| ドキュメント更新 | `docs/`・`CLAUDE.md` 等の更新が `## やること` に含まれているか |
+| 方針整合性 | `docs/decisions/`・`conventions.md`・`CLAUDE.md` と矛盾していないか |
 
 ---
 
@@ -209,9 +206,7 @@ docs/reference/issue-creation-guide.md 参照。
 **`## やること` の変更対象が `.claude/hooks/` のみの Issue は `## 振る舞い` 不要。**
 代わりに `test_<hookname>_hook.py` 契約テストを書く。
 
-**除外条件（両方を満たすこと）:**
-1. `## やること` 内のファイルパス参照が `.claude/hooks/` のみ（他パスが混在しない）
-2. `## やること` にファイルパスの記述が存在する
+**除外条件（両方満たす）:** 1) パス参照が `.claude/hooks/` のみ 2) パス記述が存在する
 
 ### Gherkin品質基準（検証可能性ゲート）
 
@@ -220,7 +215,7 @@ docs/reference/issue-creation-guide.md 参照。
 | セクション存在 | `## 振る舞い` セクションが存在するか |
 | Scenario数 | Scenario が1つ以上あるか |
 | 正常系・異常系 | 正常系・異常系の**両方**が含まれているか（異常系なしは不合格） |
-| Then句 | 具体的な値・観測可能な状態（exit code・出力文字列・ファイル存在等）を示しているか |
+| Then句 | 具体的な値・観測可能な状態（exit code・出力文字列等）を示しているか |
 
 詳細（合格例・不合格例・critical モジュール境界値ルール・positive list）は
 docs/reference/issue-creation-guide.md 参照。
@@ -229,8 +224,8 @@ docs/reference/issue-creation-guide.md 参照。
 
 ## 期待する出力例（任意セクション）
 
-`## 期待する出力例` は任意セクション（書かなくてもペナルティなし・`validate-issue.py` は存在を強制しない）。
-実装前に分かっている出力テキスト（Markdown 表・JSON・ログ行など）をそのまま貼ると、実装 AI がその内容を初回スナップショット/テスト期待値として固定してから実装するため期待通りかを diff で確認しやすくなる。
+`## 期待する出力例` は任意（未記載でもペナルティなし）。
+出力テキスト（Markdown 表・JSON・ログ行等）を貼ると、実装 AI がそれをスナップショット/テスト期待値として固定するため diff で確認しやすくなる。
 合格例・hook の動作詳細は
 docs/reference/issue-creation-guide.md 参照。
 
@@ -247,24 +242,15 @@ docs/reference/issue-creation-guide.md 参照。
 
 ## hookの動作（Claude作成時）
 
-`PreToolUse` hookが `gh issue create` コマンドを捕捉し、以下を機械的にチェックする:
-
-1. `## 背景`・`## やること` セクション存在
-2. タイトルが `🤖 <type>: <説明>` 形式か（🤖プレフィックス必須）
-3. `## やること` 各行が `- [ ]` または `- [x]` 形式か
-4. feat系: `## 設計の選択肢` セクション存在
-5. feat/fix系: `## 振る舞い` セクション存在（hook契約系 Issue は除外）
-
-不備があればコマンドをブロックし、Claudeが修正して再実行する。
-実装詳細は docs/reference/hooks.md#validate-issuepy 参照。
+`PreToolUse` hookが `gh issue create` を捕捉し、上記チェック項目を機械的に検証する。
+不備があればブロックし、Claudeが修正して再実行する。詳細: docs/reference/hooks.md#validate-issuepy
 
 ---
 
 ## 関連ドキュメント
 
-- docs/reference/issue-creation-guide.md — 詳細ガイド（合格例・source分類・Gherkin品質）
+- docs/reference/issue-creation-guide.md — 詳細ガイド
 - `docs/conventions.md` — Issue・PR・コミット規約
-- docs/reference/hooks.md — Hooks リファレンス
 - [`workflow.md`](./workflow.md) — ワークフロー規約
 
 # レビューバックエンド規約
@@ -342,36 +328,35 @@ APPROVE パスで Issue やること・振る舞いと PR diff を突き合わ�
 
 # Test Plan チェックリスト規約
 
-> **注記:** 以下の機械強制（`require-red-first` / `protect-tests` 等）は `config.json` で対応 hook を enable した利用者にのみ適用される。`copier copy` 直後の consumer はすべて default OFF のため、規約記述は参照目的。
+> **注記:** 機械強制hook は `config.json` で enable した利用者のみ適用。
 
-PR の `## Test plan` セクションの記述ルール、TDD/BDD ワークフロー、テストフレームワーク選択を定義する。
-Gherkin テンプレート・旧パターン比較・追加テスト観点ルールは docs/reference/test-plan-guide.md 参照。
+PR `## Test plan` 記述・TDD/BDD・フレームワーク選択を定義。詳細: docs/reference/test-plan-guide.md
 
-**関連:** [`.claude/rules/workflow.md`](./workflow.md)・[`.claude/rules/testing-framework.md`](./testing-framework.md)
+**関連:** [`workflow.md`](./workflow.md)
 
 ---
 
 ## テストフレームワーク選択
 
-**IMPORTANT: テストを作成する前に `.claude/rules/testing-framework.md` でフレームワークを確認すること。**
+**IMPORTANT: テスト作成前に `testing-framework.md` を確認する。**
 
 | 対象 | フレームワーク | 配置場所 |
 |------|--------------|---------|
 | `projects/gas/*/` | Jest | `projects/gas/<project>/tests/` |
 | `projects/py/*/` | pytest | `projects/py/<project>/tests/` |
 
-`projects/` 配下は `tidd run-project-tests` が一元管理する。詳細: `.claude/rules/testing-framework.md`
+`projects/` 配下は `tidd run-project-tests` が一元管理する。
 
 ---
 
 ## pytest-bdd による Executable Specification（#1283）
 
-`tidd extract-feature <N>` で `.feature` と `step_defs` skeleton を同時生成する。
+`tidd extract-feature <N>` で `.feature`・`step_defs` を同時生成する。
 
-**feat/fix PR は `.feature`（+step_defs）または `tests/test_*.py` のどちらかが必須（#1962）。**
-`projects/py/*/src/`・`projects/gas/*`（tests 除く）を変更する feat/fix PR に適用。
-判定基準: 外部観測可能な振る舞い → `.feature`、内部ユーティリティ・境界値 → `tests/test_*.py`。
-`.claude/hooks/` のみの変更（hook 契約系 Issue）は除外（`## 振る舞い` 不要・契約テストで代替）。適用範囲外（config/・docs frontmatter 等）は [`testing-framework.md`](./testing-framework.md) 参照。
+**feat/fix PR は `.feature`（+step_defs）または `test_*.py` が必須（#1962）。**
+`projects/py/*/src/`・`projects/gas/*` 変更 PR に適用。
+判定: 外部観測可能な振る舞い → `.feature`、内部 → `test_*.py`。
+`.claude/hooks/` のみの変更は除外。適用範囲外は `testing-framework.md`。
 `tidd test-plan` が未生成を検知して exit 1 でブロックする。
 
 詳細: docs/reference/pytest-bdd-workflow.md
@@ -387,32 +372,32 @@ Gherkin テンプレート・旧パターン比較・追加テスト観点ルー
 5. 作ったテストファイルのみ GREEN であることを確認する（全件実行不要）
 6. PR を作成する
 
-**commit 順序は `require-red-first.py` が機械強制する（PR 作成時にブロック）。**
-分割不能な場合は PR ボディに `<!-- allow-single-commit: <理由> -->` で bypass できる。
+**commit 順序は `require-red-first.py` が機械強制する。**
+分割不能なら `<!-- allow-single-commit: <理由> -->` で bypass 可。
 詳細: docs/reference/hooks.md#require-red-firstpy
 
-テストの公式ゲートは `tidd ai-review` 内の `tidd test-plan`。
-CircleCI `nightly-tests` の詳細経緯は docs/reference/test-plan-guide.md 参照。
+公式ゲートは `tidd ai-review` 内の `tidd test-plan`。
+CircleCI `nightly-tests` は docs/reference/test-plan-guide.md 参照。
 
-`tests/` 直下のファイルをコミットした後は `protect-tests.py` により変更不可になる。
-テストを書いてコミットする前に内容を十分確認すること。
+`tests/` 直下はコミット後 `protect-tests.py` により変更不可になる。
+コミット前に内容を十分確認すること。
 
 ---
 
 ## Test plan チェックリストの記述ルール
 
-**Scenario は Issue の `## 振る舞い` セクションに書く（PR ボディへのコピーは不要）。**
-bats・Jest・pytest の項目は Test plan に書かなくてよい（ファイル変更検出で自動実行）。
-`## Test plan` 外の checklist（やること消化状況等）は test-plan-check の対象外。
+**Scenario は Issue の `## 振る舞い` に書く。**
+Jest・pytest の項目は Test plan 不要（ファイル変更検出で自動実行）。
+`## Test plan` 外の checklist は test-plan-check の対象外。
 
 ### Test plan 項目の種類
 
 | 種別 | 書き方 | 動作 |
 |------|--------|------|
-| **AI確認** | `- [ ] [AI確認] workflow.md に記載が追加されていること` | APPROVE 後に Claude が検証して `- [x]` に更新 |
-| **AI確認-post-merge** | `- [ ] [AI確認-post-merge] nightly-tests が GREEN になること` | auto-merge を妨げない。マージ後に cron が検証 |
-| **手動** | `- [ ] [手動] ブラウザで確認する` | APPROVE 後に exit 4 で人間に委ねる |
-| **未カバー**（禁止） | `- [ ] chezmoi status で差分が出ない` | `tidd test-plan` が exit 1 でブロック |
+| **AI確認** | `- [ ] [AI確認] workflow.md 記載追加` | APPROVE 後 Claude が検証し `- [x]` に更新 |
+| **AI確認-post-merge** | `- [ ] [AI確認-post-merge] nightly-tests GREEN` | auto-merge 非妨害・cron が事後検証 |
+| **手動** | `- [ ] [手動] ブラウザで確認` | APPROVE 後 exit 4 で人間へ |
+| **未カバー**（禁止） | `- [ ] chezmoi status 差分なし` | `test-plan` が exit 1 でブロック |
 
 **テスト自動実行の仕組み:**
 
@@ -422,43 +407,30 @@ bats・Jest・pytest の項目は Test plan に書かなくてよい（ファイ
 | `projects/py/<project>/` | `pytest` | `pytest/<project>` |
 | `docs/`・`.md` のみ | スキップ | 投稿なし |
 
-GitHub Commit Status に ❌（failure/error）がある場合、`tidd ai-review` は APPROVE レビューを投稿するが自動マージを exit 4 でブロックする（Issue #831）。
+Commit Status に ❌ があれば APPROVE 後も自動マージを exit 4 でブロック。
 
-**原則: AI がテスト可能なものは AI がテストする。人間はどうしても AI にできないものだけやる。**
+**原則: AI がテスト可能なものは AI がテストする。**
 
 ---
 
 ## hook 動作検証（Issue #1294 Phase 1 以降）
 
-**hook の動作検証は `pytest + stdin JSON pipe 契約テスト` で行う。**
-
-```python
-def _run_hook(payload: dict) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(_hook_path())],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-```
-
-新しい hook を作成するとき: `test_<hookname>_hook.py` に正常系・異常系の契約テストを書く。
-旧パターン（廃止済み bash pipe）との比較は docs/reference/test-plan-guide.md 参照。
+**`pytest + stdin JSON pipe` 契約テストで検証。** 新規 hook は `test_<hookname>_hook.py` に書く。
+実装例・旧パターン比較は docs/reference/test-plan-guide.md 参照。
 
 ---
 
 ## バグ修正ルール
 
-- バグ修正時は必ず `tests/regressions/test_fix_<N>.py` にバグ再現テストを追加してから実装する
-- `tests/` 直下の既存テストファイルは変更不可（`protect-tests.py`）。`regressions/` はロック対象外
+- バグ修正は `test_fix_<N>.py` に再現テストを先に追加する
+- `tests/` 直下は変更不可。`regressions/` は対象外
 
 ---
 
 ## 関連ドキュメント
 
-- docs/reference/test-plan-guide.md — 詳細ガイド（Gherkin テンプレート・旧パターン比較・追加観点ルール）
-- [`.claude/rules/testing-framework.md`](./testing-framework.md) — フレームワーク棲み分け
+- docs/reference/test-plan-guide.md — 詳細ガイド
+- `testing-framework.md` — フレームワーク棲み分け
 - docs/reference/pytest-bdd-workflow.md — pytest-bdd 詳細
 - docs/reference/hooks.md — 全 hook リファレンス
 
@@ -597,10 +569,10 @@ consumer（copier 配布先）は操作対象で **2 種類の PAT** を使い�
 
 - 調査・判断の経緯は Issue コメントに残す。コミットに `closes #N` を含める
 - 別問題を発見したら即 Issue 起票（非対話的に `gh issue create`・機密情報は含めない）
-- **エラーに遭遇したら無視せず原因を調査する** — 一時的か恒常的かを判断し、「散発するから仕方ない」で片付けない。恒常的なエラーは `gh issue list` で重複確認の上、再発防止 Issue を起票する
+- **エラーは無視せず原因を調査する** — 一時的か恒常的か判断する。恒常的なら `gh issue list` で重複確認の上、再発防止 Issue を起票する
 - **脆弱性を発見したら Issue 化せずユーザーに直接相談する**
-- **`## 期待する出力例` がある場合**: 内容を改変せず初回スナップショット/テスト期待値として固定する（未記載時は従来フロー）
-- **config.json に `impl-delegation: true` かつ `impl-backend` が設定されている場合**: RED/GREEN 各ステップ + refactor/docs 編集ステップで `tidd propose-step` を使いコード提案を外部 backend（agy/codex/custom）へ委譲できる（`impl-delegation` 無効時またはいずれか未設定時は従来どおり自分で実装。詳細: `docs/reference/propose-step-guide.md`・#3118・#3131・#3132）
+- **`## 期待する出力例` がある場合**: 内容を改変せず初回スナップショット/テスト期待値として固定する
+- **config.json に `impl-delegation: true` かつ `impl-backend` 設定時**: `tidd propose-step` で各ステップのコード提案を外部 backend へ委譲可（無効時は自分で実装）。詳細: `docs/reference/propose-step-guide.md`
 
 ### 完了時
 

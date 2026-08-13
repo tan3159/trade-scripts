@@ -11,9 +11,9 @@ primary_language: Python
 project_name: TradeScripts
 python_package_name: trade_scripts
 technology_radar_url: ''
-use_ai_review: 'false'
+use_ai_review: 'true'
 use_coderabbit: 'true'
-use_issue_next: 'false'
-use_issue_quality_check: 'false'
+use_issue_next: 'true'
+use_issue_quality_check: 'true'
 use_scorecard: 'true'
 use_security_policy: 'true'
