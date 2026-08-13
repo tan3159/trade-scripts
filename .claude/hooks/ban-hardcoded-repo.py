@@ -13,6 +13,11 @@ Issue #1780: Edit/Write ツール呼び出し時にも発火するよう拡張�
 - 検出パスは `file_path` で対象ファイルを特定する
 - git commit パスは引き続き git staged ファイルをスキャンする
 
+Issue #3222: Edit/Write ゲートを `is_file_edit_tool()` に置換し、パス取得を
+`get_file_path()`・内容取得を `get_new_content()` に統一する（#3201・#3221）。
+Codex の apply_patch もファイル編集ツールとして扱い、patch の追加・更新行を
+検査対象にする。登録は `.rulesync/hooks.jsonc` の Edit|Write matcher に追加。
+
 Issue #1930: `git add <files> && git commit` 連結コマンドのバイパスを修正。
 PreToolUse 発火時点でステージングが空の場合も add 対象の working tree を検査する。
 
@@ -32,105 +37,49 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hardcoded_repo import (  # noqa: E402
-    PATTERNS,
+from _lib.git_helpers import git_toplevel
+from _lib.git_helpers import run_git as _run_git
+from _lib.hardcoded_repo import (
+    compile_yaml_patterns,
+    find_yaml_pattern_match,
     is_excluded_basename,
-    is_excluded_line,
     is_excluded_path,
+    line_contains_pattern,
+    load_yaml_patterns,
 )
-from _lib.hook_io import get_command, get_tool_name, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.hook_io import (
+    get_command,
+    get_file_path,
+    get_new_content,
+    get_tool_name,
+    is_file_edit_tool,
+    is_hook_enabled,
+    read_hook_input,
+    resolve_target_cwd,
+)
+from _lib.shell_parse import split_shell_fragments
 
-_GIT_COMMIT_RE = re.compile(r"(^|&&|;|\|)\s*git commit(\s|$)")
+# Issue #2454（PR #2476 レビュー指摘）: worktree コミットで多用される
+# `git -C <path> commit` も入口判定に一致させる（#2443 の ban-claude-p.py と同型）。
+_GIT_COMMIT_RE = re.compile(
+    r"(^|&&|;|\|)\s*git\s+(?:-C\s+(?:\"[^\"]+\"|'[^']+'|\S+)\s+)?commit(\s|$)"
+)
 _STAGED_PATH_RE = re.compile(r"^(scripts/|\.claude/|agt/)")
 
 # Edit/Write ツールで検査対象にするパスプレフィックス（git commit パスと同じスコープ）
 _EDIT_PATH_RE = re.compile(r"^(scripts/|\.claude/|agt/)")
 
 
-def _load_yaml_patterns(git_root: str) -> list[dict[str, str]]:
-    """hardcoded-patterns.yaml から追加パターンリストを読み込む（stdlib のみ）.
-
-    PyYAML を使わず、detect-ai-confirm-misuse.py と同じ手書き YAML パーサーを使う。
-    YAML は git_root（リポジトリルート）の `.claude/rules/hardcoded-patterns.yaml` を参照する。
-    ファイルが存在しない場合は空リストを返す（後方互換・yaml 未設定環境対応）。
-
-    フォーマット:
-        patterns:
-          - id: <str>
-            regex: '<str>'
-            description: '<str>'
-            message: '<str>'
-
-    Returns:
-        パターン dict のリスト（regex キーを持つ）。読み込み失敗・ファイル不在は空リスト。
-    """
-    yaml_path = Path(git_root) / ".claude" / "rules" / "hardcoded-patterns.yaml"
-    if not yaml_path.is_file():
-        return []
-    try:
-        text = yaml_path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        # コメント行・空行はスキップ
-        if stripped.startswith("#") or not stripped:
-            continue
-        # 新しいエントリの開始
-        if stripped.startswith("- id:"):
-            if current:
-                entries.append(current)
-            current = {"id": stripped[len("- id:") :].strip()}
-        elif ":" in stripped and current:
-            key, _, val = stripped.partition(":")
-            key = key.strip().lstrip("- ")
-            val = val.strip().strip("'\"")
-            if key and val:
-                current[key] = val
-    if current:
-        entries.append(current)
-
-    # 'regex' キーを持つエントリのみ返す（patterns: [] 等のダミー行を除外）
-    return [e for e in entries if "regex" in e]
-
-
-def _git(*args: str) -> tuple[int, str]:
-    try:
-        result = subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False, timeout=20
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+def _git(*args: str, cwd: str | None = None) -> tuple[int, str]:
+    """Issue #2958: subprocess 実行部は `_lib.git_helpers.run_git()` に委譲する."""
+    result = _run_git(*args, cwd=cwd, timeout=20)
+    if result is None:
         return 1, ""
     return result.returncode, result.stdout
-
-
-def _compile_yaml_patterns(
-    yaml_patterns: list[dict[str, str]],
-) -> list[tuple[re.Pattern[str], str, str]]:
-    """YAML パターンを事前コンパイルし、不正 regex は WARN + skip して返す."""
-    compiled_yaml: list[tuple[re.Pattern[str], str, str]] = []
-    for entry in yaml_patterns:
-        raw_regex = entry.get("regex", "")
-        message = entry.get(
-            "message", f"個人値パターン '{raw_regex}' がハードコードされています"
-        )
-        try:
-            compiled = re.compile(raw_regex)
-        except re.error:
-            sys.stderr.write(
-                f"WARN: hardcoded-patterns.yaml の regex が不正です: {raw_regex}\n"
-            )
-            continue
-        compiled_yaml.append((compiled, message, raw_regex))
-    return compiled_yaml
 
 
 def _check_content_lines(
@@ -152,59 +101,51 @@ def _check_content_lines(
     if is_excluded_basename(basename):
         return False, ""
 
-    # 既存デフォルトパターン（文字列マッチ）
-    for pattern in PATTERNS:
-        for line in lines:
-            if pattern not in line:
-                continue
-            if is_excluded_line(line):
-                continue
-            found_message = (
-                "リポジトリ固有文字列 (being-gaia-plan, ai-dev-handbook) "
-                "がハードコードされています。\n"
-                "gh repo view --json nameWithOwner -q .nameWithOwner で動的取得に変更してください。\n"
-                "詳細: Issue #336, #868 / docs/reference/hooks.md#ban-hardcoded-repopy\n"
-            )
-            sys.stderr.write(f"Blocked: {found_message}\n")
-            return True, found_message
+    # 既存デフォルトパターン（文字列マッチ・コメント行スキップは line_contains_pattern 内蔵）
+    for line in lines:
+        if line_contains_pattern(line) is None:
+            continue
+        found_message = (
+            "リポジトリ固有文字列 (being-gaia-plan, ai-dev-handbook) "
+            "がハードコードされています。\n"
+            "gh repo view --json nameWithOwner -q .nameWithOwner で動的取得に変更してください。\n"
+            "詳細: Issue #336, #868 / docs/reference/hooks.md#ban-hardcoded-repopy\n"
+        )
+        sys.stderr.write(f"Blocked: {found_message}\n")
+        return True, found_message
 
-    # YAML 追加パターン（regex マッチ）
-    for compiled, message, _raw_regex in compiled_yaml:
-        for line in lines:
-            if not compiled.search(line):
-                continue
-            if is_excluded_line(line):
-                continue
-            found_message = (
-                f"{message}。\n"
-                f"個人値・組織固有値のハードコードは避け、環境変数や設定ファイルで管理してください。\n"
-                f"詳細: docs/reference/hooks.md#ban-hardcoded-repopy\n"
-            )
-            sys.stderr.write(f"Blocked: {message}\n")
-            return True, found_message
+    # YAML 追加パターン（regex マッチ・コメント行スキップは find_yaml_pattern_match 内蔵）
+    for line in lines:
+        match = find_yaml_pattern_match(line, compiled_yaml)
+        if match is None:
+            continue
+        message, _raw_regex = match
+        found_message = (
+            f"{message}。\n"
+            f"個人値・組織固有値のハードコードは避け、環境変数や設定ファイルで管理してください。\n"
+            f"詳細: docs/reference/hooks.md#ban-hardcoded-repopy\n"
+        )
+        sys.stderr.write(f"Blocked: {message}\n")
+        return True, found_message
 
     return False, ""
 
 
 def _check_edit_write_tool(
     payload: dict,
-    tool_name: str,
     git_root: str,
 ) -> int:
-    """Edit / Write ツール呼び出し時のハードコード検査（Issue #1780）.
+    """ファイル編集ツール（Edit / Write / apply_patch）呼び出し時のハードコード検査.
 
-    Edit ツール: `new_string` フィールドを検査する
-    Write ツール: `content` フィールドを検査する
-    `file_path` で除外対象（basename・パスプレフィックス）を判定する。
+    Issue #1780: Edit / Write ツール対応。
+    Issue #3201: パス取得を `get_file_path()` に統一（Codex apply_patch 対応）。
+    Issue #3221・#3222: 内容取得を `get_new_content()` に統一し、apply_patch の
+    追加・更新行（patch の `+` 行）も検査対象にする。
 
     Returns:
         0 = 問題なし、2 = ブロック
     """
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return 0
-
-    file_path = str(tool_input.get("file_path") or "")
+    file_path = get_file_path(payload)
     if not file_path:
         return 0
 
@@ -219,32 +160,35 @@ def _check_edit_write_tool(
     if not _EDIT_PATH_RE.match(rel_path):
         return 0
 
-    # 検査テキストの取得
-    if tool_name == "Edit":
-        text = str(tool_input.get("new_string") or "")
-    else:  # Write
-        text = str(tool_input.get("content") or "")
-
+    # 検査テキストの取得（apply_patch は patch の追加・更新行。Issue #3221/#3222）
+    text = get_new_content(payload)
     if not text:
         return 0
 
     # YAML パターンを読み込む
-    yaml_patterns = _load_yaml_patterns(git_root)
-    compiled_yaml = _compile_yaml_patterns(yaml_patterns)
+    yaml_patterns = load_yaml_patterns(git_root)
+    compiled_yaml = compile_yaml_patterns(yaml_patterns)
 
     lines = text.splitlines()
     found, _msg = _check_content_lines(lines, file_path, compiled_yaml)
     return 2 if found else 0
 
 
-_GIT_ADD_RE = re.compile(r"^\s*git\s+add\b")
+# Issue #2454（PR #2476 レビュー指摘）: `git -C <path> add` セグメントも認識させる
+# （このセグメントは `re.split` 済みのため `(^|&&|;|\|)` 前置は不要）。
+_GIT_ADD_RE = re.compile(r"^\s*git\s+(?:-C\s+(?:\"[^\"]+\"|'[^']+'|\S+)\s+)?add\b")
 # -A / --all / . → untracked を含む全体スキャン
 _ADD_ALL_FLAGS = frozenset(["-A", "--all"])
 # -u / --update → tracked 変更のみ（untracked は含まない）
 _ADD_UPDATE_FLAGS = frozenset(["-u", "--update"])
 
 
-_GIT_COMMIT_SEGMENT_RE = re.compile(r"^\s*git\s+commit\b")
+# Issue #2454（PR #2476 レビュー指摘）: `git -C <path> commit` セグメントも認識させる。
+# これがないと add セグメントの「後続 commit あり」判定（has_following_commit）が
+# 常に False になり、-C 付き add+commit チェーンの add が検査対象から漏れる。
+_GIT_COMMIT_SEGMENT_RE = re.compile(
+    r"^\s*git\s+(?:-C\s+(?:\"[^\"]+\"|'[^']+'|\S+)\s+)?commit\b"
+)
 
 
 def _iter_add_segments(command: str) -> list[tuple[list[str], bool, bool]]:
@@ -253,6 +197,8 @@ def _iter_add_segments(command: str) -> list[tuple[list[str], bool, bool]]:
     チェーンセパレータ（&&, ;, ||, |）でセグメントに分割し、`git add` セグメントごとに
     (pathspecs, add_all, add_update) を生成する。グローバルマージではなくセグメント単位で
     保持することで、pathspec スコープを正確に反映できる（コードレビュー指摘修正）。
+    分割は quote-aware な `_lib/shell_parse.split_shell_fragments` を使う（Issue #2966。
+    naive な `re.split` はクォート内の区切り文字でも誤分割していた）。
 
     - add_all=True: -A / --all フラグ、または 'A' を含む短フラグ束（例: -Av）→
       untracked を含む working tree 全体を走査する。
@@ -271,7 +217,7 @@ def _iter_add_segments(command: str) -> list[tuple[list[str], bool, bool]]:
     修正後: 各 add セグメントについて「その後ろに commit セグメントが存在するか」を
     チェックし、後続 commit がある add は検査対象に含める（後続 commit がない add のみ除外）。
     """
-    segments = re.split(r"&&|;|\|\||\|", command)
+    segments = split_shell_fragments(command)
 
     # パス 1: 各セグメントが add / commit / other のどれかを先に判定する
     seg_is_commit = [bool(_GIT_COMMIT_SEGMENT_RE.match(s)) for s in segments]
@@ -292,8 +238,8 @@ def _iter_add_segments(command: str) -> list[tuple[list[str], bool, bool]]:
         if not has_following_commit:
             continue
 
-        # "git add" 以降をトークン化
-        rest = re.sub(r"^\s*git\s+add\b", "", segment)
+        # "git add" 以降をトークン化（Issue #2454: `-C <path>` prefix も除去する）
+        rest = _GIT_ADD_RE.sub("", segment)
         try:
             tokens = shlex.split(rest)
         except ValueError:
@@ -359,11 +305,13 @@ def _main() -> int:
     payload = read_hook_input(hook_name="PreToolUse")  # Issue #1364
     tool_name = get_tool_name(payload)
 
-    # Issue #1780: Edit / Write ツール対応
-    if tool_name in ("Edit", "Write"):
-        rc, root_out = _git("rev-parse", "--show-toplevel")
-        git_root = root_out.strip() if rc == 0 else ""
-        return _check_edit_write_tool(payload, tool_name, git_root)
+    # Issue #1780: Edit / Write ツール対応。
+    # Issue #3201・#3222: apply_patch を含むファイル編集ツール判定へ統一する
+    if is_file_edit_tool(tool_name):
+        # Issue #2454: worktree で編集中のファイルを検査できるよう対象 CWD を解決する
+        target_cwd = resolve_target_cwd(payload)
+        git_root = git_toplevel(cwd=target_cwd) or ""
+        return _check_edit_write_tool(payload, git_root)
 
     # git commit パス（既存動作）
     command = get_command(payload)
@@ -372,12 +320,12 @@ def _main() -> int:
     if not _GIT_COMMIT_RE.search(command):
         return 0
 
-    rc, root_out = _git("rev-parse", "--show-toplevel")
-    if rc != 0:
+    # Issue #2454: worktree でコミットされた内容を検査できるよう対象 CWD を解決する
+    target_cwd = resolve_target_cwd(payload, command)
+    commit_git_root = git_toplevel(cwd=target_cwd)
+    if not commit_git_root:
         return 0
-    git_root = root_out.strip()
-    if not git_root:
-        return 0
+    git_root = commit_git_root
 
     rc, staged_out = _git(
         "-C", git_root, "diff", "--cached", "--name-only", "--diff-filter=AM"
@@ -397,8 +345,8 @@ def _main() -> int:
         return 0
 
     # YAML から追加パターンを読み込む（Issue #1642）
-    yaml_patterns = _load_yaml_patterns(git_root)
-    compiled_yaml = _compile_yaml_patterns(yaml_patterns)
+    yaml_patterns = load_yaml_patterns(git_root)
+    compiled_yaml = compile_yaml_patterns(yaml_patterns)
 
     # ── staged ファイルの検査（既存動作） ──────────────────────────────────────
     for file in target_files:

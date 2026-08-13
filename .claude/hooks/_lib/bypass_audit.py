@@ -1,13 +1,15 @@
 """バイパス監査ログ記録ヘルパ (Issue #1625).
 
 hook がバイパス経路を通ったとき ``record_bypass()`` を呼ぶと
-``~/.cache/tidd/bypass-audit.jsonl`` に JSON Lines 形式で 1 行 append される。
+``shared/paths.cache_dir() / "bypass-audit.jsonl"`` 相当のパスに JSON Lines 形式で
+1 行 append される（Issue #2950: reader 側 `tidd_tools.weekly_audit` とパスを統一）。
 
 集計は `tidd weekly-audit bypass-summary` サブコマンドで行う。
 
 **設計方針:**
-- stdlib のみ（hook は依存追加禁止）
-- 記録失敗（disk full 等）は silent skip（hook 本体の block 判定に影響しない）
+- stdlib のみ（hook は依存追加禁止。そのため `platformdirs` は import せず、
+  `bw_session_check.py::_get_cache_base()` と同水準の簡易ロジックで OS 別パスを解決する）
+- 記録失敗（disk full 等）は skip + stderr WARN（hook 本体の block 判定に影響しない。Issue #1999）
 - 環境変数 ``BYPASS_AUDIT_LOG`` でログファイルパスを上書き可（テスト用）
 - append の atomic 性は OS の O_APPEND に委ねる（1 行 <= PIPE_BUF なので競合しない）
 """
@@ -18,18 +20,42 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 _BYPASS_LOG_ENV = "BYPASS_AUDIT_LOG"
-_DEFAULT_LOG_PATH = Path.home() / ".cache" / "tidd" / "bypass-audit.jsonl"
+
+# shared/paths.py の APP_NAME と統一（Issue #2950）
+# Issue #3683: 上流固有文字列を排除するため中立 app 名 tidd を使う
+# （shared/paths.py の APP_NAME = "tidd" と同一）。
+_APP_NAME = "tidd"
+
+
+def _default_cache_base() -> Path:
+    """OS 別のキャッシュベースディレクトリを返す（`shared/paths.cache_dir()` の簡易版）.
+
+    hook は stdlib のみで動く制約があるため `platformdirs` は使えない。
+    """
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            return Path(local_app_data) / _APP_NAME
+        return Path.home() / "AppData" / "Local" / _APP_NAME
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / _APP_NAME
+    else:
+        xdg = os.environ.get("XDG_CACHE_HOME", "")
+        if xdg:
+            return Path(xdg) / _APP_NAME
+        return Path.home() / ".cache" / _APP_NAME
 
 
 def _log_path() -> Path:
     override = os.environ.get(_BYPASS_LOG_ENV)
     if override:
         return Path(override)
-    return _DEFAULT_LOG_PATH
+    return _default_cache_base() / "bypass-audit.jsonl"
 
 
 def _get_current_pr_number() -> int | None:
@@ -80,7 +106,7 @@ def record_bypass(
 
     副作用:
         ログファイルが存在しなければ作成する（親ディレクトリも含む）。
-        書き込み失敗は silent skip（hook 本体の判定に影響しない）。
+        書き込み失敗は skip + stderr WARN（hook 本体の判定に影響しない。Issue #1999）。
     """
     out = _log_file if _log_file is not None else _log_path()
     ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -103,6 +129,11 @@ def record_bypass(
         serialized = json.dumps(payload, ensure_ascii=False, default=str)
         with out.open("a", encoding="utf-8") as f:
             f.write(serialized + "\n")
-    except (OSError, TypeError, ValueError):
-        # disk full / permission denied / JSON エラー等は silent skip
+    except (OSError, TypeError, ValueError) as exc:
+        # disk full / permission denied / JSON エラー等でも hook の判定は変えない。
+        # silent skip だと監査証跡の欠落に気づけないため WARN を stderr に出す（Issue #1999）。
+        print(
+            f"bypass-audit: WARN: 監査ログ書き込みに失敗しました ({out}): {exc}",
+            file=sys.stderr,
+        )
         return

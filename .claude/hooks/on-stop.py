@@ -10,9 +10,22 @@ Issue #1561: `cache/issue-next-state.json` の孤児 state（worktree なし・P
 Issue #1698: 孤児 state 検出時に exit 2 + stderr で auto-resume 指示を注入する。
   - Stop hook exit 2 は stop をブロックして stderr を Claude のコンテキストに注入する仕様を利用。
   - `resume_attempts` フィールドで 3 回超の無限ループを防ぐ（fail-safe: exit 0）。
+Issue #2544: 孤児判定の前に Issue が CLOSED でないかを確認し、CLOSED なら state を削除して終了する。
+  - PR 検出を --state open から --state all に変更し MERGED PR も孤児でないと判定する。
+  - gh 呼び出し失敗時は false positive を避けるため孤児判定しない。
+Issue #2955: 各サブ機能を config.json の独立キーで個別に on/off できるようにした
+  （`_read_bool_hook_config` 共通ヘルパー・詳細は下記「サブ機能の個別 gating」）。
+Issue #2967: サブ機能（Slack 通知・merge-summary 転記チェック・孤児 state 検出・
+  ブランチ掃除・brief 生成）のロジックを `_lib/` 配下の各モジュールへ移設した（挙動変更なし）。
+  本ファイルは throttle・timeout・thread 管理などの orchestration のみを担う。
+  移設先: `_lib/slack_notify.py`・`_lib/stop_merge_summary_check.py`・
+  `_lib/stop_orphan_state.py`・`_lib/branch_cleanup.py`・`_lib/brief_writer.py`。
+  git/gh subprocess 実行部は `_lib/git_helpers.py`（`run_git_in_repo`/`run_gh`）に統一されている。
+Issue #2957: stdin 読み取り（旧 `_lib/stop_payload.py`）は `_lib/hook_io.py::read_stop_hook_input()`
+  へ統合した（Stop 系 3 hook 共通の isatty 対応 + WARN-only schema 検証バリアント）。
 
 動作:
-  1. ON_STOP_SLACK_ENABLED=1 なら stop_reason=input_required で Slack 通知（fire-and-forget）
+  1. config.json の "on-stop-slack": true なら stop_reason=input_required で Slack 通知（fire-and-forget）
   2. `cache/issue-next-state.json` の `current_issue` について、対応する worktree
      （branch 名に issue-<N>- を含む）と open PR（closes #<N> を本文に含む）の両方が
      無ければ exit 2 + stderr で "Orphan issue-next state" と auto-resume 指示を注入する
@@ -30,18 +43,29 @@ Issue #1698: 孤児 state 検出時に exit 2 + stderr で auto-resume 指示を
 
 hook は常に exit 0（セッション終了をブロックしない）。stdlib のみ使用。
 
+サブ機能の個別 gating（Issue #2955）:
+  config.json の以下のキーでサブ機能ごとに on/off できる。すべて `_read_bool_hook_config`
+  （`hook_io.get_hook_config` を委譲）経由で読み、設定ファイルなし・キーなし・不正値の
+  場合は下記デフォルトにフォールバックする（fail-safe）。
+    - "on-stop-slack"          : Slack 通知（デフォルト false・opt-in）
+    - "on-stop-orphan-detect"  : 孤児 issue-next state 検出（デフォルト true）
+    - "on-stop-branch-cleanup" : gone/merged ブランチ掃除（デフォルト true・throttle 対象）
+    - "on-stop-brief"          : cache/brief.md 生成（デフォルト true・throttle 対象）
+
+Slack 通知の有効化:
+  config.json（``~/.config/tidd_tools/config.json``）の ``"on-stop-slack"`` キーを
+  true にすると有効。デフォルトは false（opt-in）。旧 env var ``ON_STOP_SLACK_ENABLED``
+  は Issue #2497 で完全に廃止した（後方互換なし）。CLI 変更: ``tidd config enable on-stop-slack --machine``。
+
 環境変数:
-  ON_STOP_SLACK_ENABLED        1 なら Slack 通知を送る（デフォルト 0）。
-                               **deprecated（Issue #1994）**: hooks-config.json の
-                               "on-stop-slack" キー（true/false）が優先される。
   ON_STOP_THROTTLE_SECONDS     重い処理の実行間隔秒数（デフォルト 86400）。
                                0 なら throttle 無効で毎回実行する。
-                               非数値ならデフォルトにフォールバック。
+                               非数値ならデフォルトにフォールバックする。
   ON_STOP_LAST_CLEANUP_FILE    最終実行タイムスタンプ保存先
                                （デフォルト ~/.cache/on-stop-last-cleanup）
   AI_REVIEW_STOP_HOOK_TIMEOUT  重い処理全体の壁時計タイムアウト秒数（デフォルト 15）。
                                超過時は未完了処理を打ち切って exit 0 で終わる。
-                               非数値・0 以下ならデフォルトにフォールバック。
+                               非数値・0 以下ならデフォルトにフォールバックする。
   ON_STOP_PROFILE              1 なら各 phase の所要時間を stderr にログ出力する（Issue #1557）。
                                "on-stop: PROFILE: <phase>=<elapsed_ms>ms" 形式で出力。
                                デフォルト 0（無効）。実測ボトルネック特定用の opt-in。
@@ -49,12 +73,8 @@ hook は常に exit 0（セッション終了をブロックしない）。stdli
 
 from __future__ import annotations
 
-import datetime as _dt
-import json
 import os
 import re
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -65,247 +85,33 @@ _DEFAULT_THROTTLE_SECONDS = 86400  # 1 日
 _DEFAULT_STOP_HOOK_TIMEOUT_SECONDS = 15  # Issue #1175 target
 _DIGITS_RE = re.compile(r"^[0-9]+$")
 
+# Issue #2967: サブ機能ロジックは `_lib/` 配下へ移設した。on-stop.py の既存慣習
+# （関数ローカルで `_lib` を sys.path 追加してから bare import する）とは別に、
+# `_run_heavy_work` 等がテストから monkeypatch される名前（`_cleanup_gone_branches` 等）は
+# モジュール top-level で import して on-stop.py の module 名前空間に束縛しておく必要がある
+# （monkeypatch.setattr(module, "_cleanup_gone_branches", ...) が機能するため）。
+sys.path.insert(0, str(Path(__file__).resolve().parent / "_lib"))
 
-def _drain_stdin() -> str:
-    """非対話の場合のみ stdin を 1 行読む。対話端末では空を返す."""
-    if sys.stdin.isatty():
-        return ""
-    try:
-        return sys.stdin.readline()
-    except (OSError, ValueError):
-        return ""
-
-
-def _extract_stop_reason(raw: str) -> str:
-    if not raw.strip():
-        return ""
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        # 旧 sh は grep -o で抜き出していたので、JSON でなくてもパターン抽出を試みる
-        m = re.search(r'"stop_reason"\s*:\s*"([^"]*)"', raw)
-        return m.group(1) if m else ""
-    if isinstance(data, dict):
-        # Issue #1364: Stop schema で validate（不一致は WARN log のみで exit 2 は避ける・
-        # Stop hook は Slack 通知等の副作用処理を伴うため silent fail 原則の対象外）
-        _lib_dir = Path(__file__).resolve().parent / "_lib"
-        if str(_lib_dir) not in sys.path:
-            sys.path.insert(0, str(_lib_dir))
-        try:
-            from validate_payload import (  # type: ignore[import-not-found]
-                PayloadValidationError,
-                validate_payload,
-            )
-
-            validate_payload(data, "Stop")
-        except ImportError:
-            pass
-        except PayloadValidationError as exc:
-            sys.stderr.write(f"on-stop.py: WARN: Stop schema mismatch: {exc}\n")
-        return str(data.get("stop_reason") or "")
-    return ""
-
-
-def _notify_slack(webhook: str) -> None:
-    """Fire-and-forget Slack 通知（Issue #1175）: Popen で投げっぱなしにし結果を待たない.
-
-    curl 側の ``--max-time`` で自身をタイムアウトさせる。親（この hook）は wait せず
-    速やかに返る。
-    """
-    try:
-        subprocess.Popen(  # noqa: S603 — 引数は静的なので shell injection なし
-            [
-                "curl",
-                "-s",
-                "-X",
-                "POST",
-                webhook,
-                "-H",
-                "Content-Type: application/json",
-                "-d",
-                '{"text":"<!channel> Claude Code がユーザー入力待ちになりました。"}',
-                "--max-time",
-                "10",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except (FileNotFoundError, OSError):
-        pass
-
-
-def _git(repo: str, *args: str, timeout: int = 8) -> tuple[int, str, str]:
-    try:
-        result = subprocess.run(
-            ["git", "-C", repo, *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-    except FileNotFoundError:
-        return 1, "", ""
-    except subprocess.TimeoutExpired:
-        sys.stderr.write(
-            f"on-stop: WARN: git timeout ({timeout}s) for: git {' '.join(args)}\n"
-        )
-        return 1, "", ""
-    return result.returncode, result.stdout, result.stderr
-
-
-def _gh(*args: str, timeout: int = 8) -> tuple[int, str]:
-    try:
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=timeout
-        )
-    except FileNotFoundError:
-        return 1, ""
-    except subprocess.TimeoutExpired:
-        sys.stderr.write(
-            f"on-stop: WARN: gh timeout ({timeout}s) for: gh {' '.join(args)}\n"
-        )
-        return 1, ""
-    return result.returncode, result.stdout
-
-
-def _detect_default_branch(repo: str) -> str:
-    rc, out, _ = _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
-    if rc != 0:
-        return "main"
-    name = out.strip()
-    name = name.replace("refs/remotes/origin/", "", 1)
-    return name or "main"
-
-
-def _cleanup_gone_branches(repo: str, default_branch: str) -> None:
-    # Issue #1175: fetch はネットワーク I/O のためデフォルト 8s より長めの 15s。
-    # 全体は AI_REVIEW_STOP_HOOK_TIMEOUT で覆われるので、fetch 個別の timeout は
-    # global timeout 上限（デフォルト 15s）と揃えておく。
-    _git(repo, "fetch", "--prune", timeout=15)
-
-    rc, out, _ = _git(
-        repo,
-        "for-each-ref",
-        "--format=%(refname:short) %(upstream:track)",
-        "refs/heads",
-    )
-    if rc != 0:
-        return
-
-    gone: list[str] = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == "[gone]" and parts[0] != default_branch:
-            gone.append(parts[0])
-
-    if not gone:
-        return
-
-    sys.stderr.write(
-        f"on-stop: リモート削除済みブランチを検出しました: {' '.join(gone)} \n"
-    )
-    for branch in gone:
-        _, out_b, err_b = _git(repo, "branch", "-D", "--", branch)
-        for line in (out_b + err_b).splitlines():
-            if line:
-                sys.stderr.write(f"on-stop: {line}\n")
-
-
-def _checked_out_branches(repo: str) -> set[str]:
-    rc, out, _ = _git(repo, "worktree", "list", "--porcelain")
-    if rc != 0:
-        return set()
-    result: set[str] = set()
-    for line in out.splitlines():
-        if line.startswith("branch refs/heads/"):
-            result.add(line[len("branch refs/heads/") :])
-    return result
-
-
-def _all_local_branches(repo: str, default_branch: str) -> list[str]:
-    rc, out, _ = _git(repo, "branch", "--format=%(refname:short)")
-    if rc != 0:
-        return []
-    return [b for b in out.splitlines() if b and b != default_branch]
-
-
-def _fetch_pr_state_map(repo_nwo: str) -> dict[str, set[str]]:
-    """Issue #1565: `gh pr list --state all` を **1 回** だけ叩いてブランチ→状態集合を返す.
-
-    従来はブランチごとに `gh pr list --head <branch> --state open` / `... --state merged`
-    を N+1 で呼んでいたため 20 ブランチで最大 40 回の gh 呼び出しになっていた。
-    本関数は 1 回の bulk クエリに統合し、Python 側で dict にマップして各ブランチの
-    state を lookup できる形に変換する。
-
-    Returns:
-        {"branch_name": {"OPEN", "MERGED", "CLOSED"}, ...} 形式の dict。
-        1 ブランチに複数の PR が紐付いている場合は state 集合になる（例: 過去 MERGED あり + 現在 OPEN）。
-        gh 呼び出しが失敗した場合や JSON parse 失敗の場合は空 dict を返す。
-    """
-    args = ["pr", "list"]
-    if repo_nwo:
-        args.extend(["--repo", repo_nwo])
-    # `--limit 200`: 実運用の並行 PR 数 (STEP 0 上限 3) を大きく上回る余裕を持たせる
-    args.extend(
-        ["--state", "all", "--limit", "200", "--json", "headRefName,state"]
-    )
-    rc, out = _gh(*args)
-    if rc != 0:
-        return {}
-    try:
-        parsed = json.loads(out or "[]")
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(parsed, list):
-        return {}
-
-    result: dict[str, set[str]] = {}
-    for item in parsed:
-        if not isinstance(item, dict):
-            continue
-        branch = item.get("headRefName")
-        state = item.get("state")
-        if not isinstance(branch, str) or not isinstance(state, str):
-            continue
-        result.setdefault(branch, set()).add(state)
-    return result
-
-
-def _cleanup_merged_pr_branches(repo: str, default_branch: str) -> None:
-    """Issue #1565: bulk `gh pr list --state all` で N+1 を解消する.
-
-    従来はブランチごとに `_pr_count(open)` / `_pr_count(merged)` を呼び出していたため
-    20 ブランチで最大 40 回の gh 呼び出しになっていた。本改修で `gh pr list` の呼び出しは
-    1 回（+ `gh repo view` 1 回）に定数化される。
-    """
-    if shutil.which("gh") is None:
-        return
-    checked_out = _checked_out_branches(repo)
-    all_branches = _all_local_branches(repo, default_branch)
-    rc, repo_nwo = _gh(
-        "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"
-    )
-    repo_nwo = repo_nwo.strip() if rc == 0 else ""
-
-    # bulk クエリ: 1 回の gh 呼び出しで全 PR の (branch, state) を取得する
-    pr_state_map = _fetch_pr_state_map(repo_nwo)
-
-    for branch in all_branches:
-        if branch in checked_out:
-            continue
-        states = pr_state_map.get(branch, set())
-        # OPEN が 1 件でもあれば保持
-        if "OPEN" in states:
-            continue
-        # MERGED があれば削除対象
-        if "MERGED" in states:
-            sys.stderr.write(
-                f"on-stop: MERGED PR 紐付きブランチを削除します: {branch}\n"
-            )
-            _, out_b, err_b = _git(repo, "branch", "-D", "--", branch)
-            for line in (out_b + err_b).splitlines():
-                if line:
-                    sys.stderr.write(f"on-stop: {line}\n")
+from branch_cleanup import (  # type: ignore[import-not-found]
+    cleanup_gone_branches as _cleanup_gone_branches,
+)
+from branch_cleanup import (
+    cleanup_merged_pr_branches as _cleanup_merged_pr_branches,
+)
+from branch_cleanup import (
+    detect_default_branch as _detect_default_branch,
+)
+from brief_writer import write_brief as _write_brief  # type: ignore[import-not-found]
+from hook_io import (
+    read_stop_hook_input,  # type: ignore[import-not-found]  # Issue #2957
+)
+from slack_notify import notify_slack as _notify_slack  # type: ignore[import-not-found]
+from stop_merge_summary_check import (  # type: ignore[import-not-found]
+    check_merge_summary_in_transcript as _check_merge_summary_in_transcript,
+)
+from stop_orphan_state import (  # type: ignore[import-not-found]
+    detect_orphan_issue_next_state as _detect_orphan_issue_next_state,
+)
 
 
 def _resolve_last_cleanup_file() -> Path:
@@ -362,95 +168,6 @@ def _update_last_cleanup(last_cleanup_file: Path) -> None:
         pass
 
 
-def _write_brief(repo: str, brief_path: Path) -> None:
-    """Issue #1175: 独立した git / gh 呼び出しを ThreadPoolExecutor で並列実行する.
-
-    ``repo view -> pr list`` のみ順序依存で、それ以外は完全に独立。
-    """
-    brief_path.parent.mkdir(parents=True, exist_ok=True)
-    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    issue_high_args = (
-        "issue",
-        "list",
-        "--label",
-        "priority: high",
-        "--label",
-        "priority: critical",
-        "--state",
-        "open",
-        "--json",
-        "number,title",
-        "--template",
-        '{{range .}}- #{{.number}} {{.title}}{{"\\n"}}{{end}}',
-    )
-    issue_all_args = (
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,labels",
-        "--template",
-        '{{range .}}- #{{.number}} {{.title}}{{"\\n"}}{{end}}',
-    )
-
-    with ThreadPoolExecutor(max_workers=5, thread_name_prefix="brief") as ex:
-        f_branch = ex.submit(_git, repo, "branch", "--show-current")
-        f_log = ex.submit(_git, repo, "log", "--oneline", "-5")
-        f_repo_nwo = ex.submit(
-            _gh, "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"
-        )
-        f_issue_high = ex.submit(_gh, *issue_high_args)
-        f_issue_all = ex.submit(_gh, *issue_all_args)
-
-        rc_nwo, repo_nwo_raw = f_repo_nwo.result()
-        repo_nwo = repo_nwo_raw.strip() if rc_nwo == 0 else ""
-        pr_args = ["pr", "list"]
-        if repo_nwo:
-            pr_args.extend(["--repo", repo_nwo])
-        pr_args.extend(
-            [
-                "--state",
-                "open",
-                "--json",
-                "number,title,headRefName",
-                "--template",
-                '{{range .}}- #{{.number}} {{.title}} ({{.headRefName}}){{"\\n"}}{{end}}',
-            ]
-        )
-        f_pr = ex.submit(_gh, *pr_args)
-
-        rc_branch, out_branch, _ = f_branch.result()
-        rc_log, out_log, _ = f_log.result()
-        rc_pr, out_pr = f_pr.result()
-        rc_ih, out_ih = f_issue_high.result()
-        rc_ia, out_ia = f_issue_all.result()
-
-    lines: list[str] = []
-    lines.append(f"# Brief — {now}")
-    lines.append("")
-    lines.append("## ブランチ")
-    lines.append(out_branch.strip() if rc_branch == 0 else "")
-    lines.append("")
-    lines.append("## 直近のコミット")
-    lines.append(out_log.rstrip() if rc_log == 0 else "")
-    lines.append("")
-
-    lines.append("## Open PR")
-    lines.append(out_pr.rstrip() if rc_pr == 0 and out_pr.strip() else "（なし）")
-    lines.append("")
-
-    lines.append("## Open Issue（priority: high/critical）")
-    lines.append(out_ih.rstrip() if rc_ih == 0 and out_ih.strip() else "（なし）")
-    lines.append("")
-
-    lines.append("## Open Issue（全件）")
-    lines.append(out_ia.rstrip() if rc_ia == 0 and out_ia.strip() else "（なし）")
-
-    brief_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def _resolve_stop_hook_timeout() -> int:
     """AI_REVIEW_STOP_HOOK_TIMEOUT を int で解決する（Issue #1175）.
 
@@ -488,14 +205,21 @@ def _run_heavy_work(repo_root: str, brief: Path) -> None:
     並列実行する。個別 phase の例外は握りつぶす（Stop hook は exit 0 が原則）。
 
     Issue #1557: ON_STOP_PROFILE=1 なら各 phase の所要時間を stderr に出力する。
+    Issue #2955: `on-stop-branch-cleanup` / `on-stop-brief` キーでそれぞれ個別に
+    無効化できる（default True・従来どおり常時実行）。無効化された phase は
+    ThreadPoolExecutor に submit せずスキップする。
     """
     profile = _profile_enabled()
+    branch_cleanup_enabled = _read_bool_hook_config(
+        "on-stop-branch-cleanup", default=True
+    )
+    brief_enabled = _read_bool_hook_config("on-stop-brief", default=True)
     default_branch = _detect_default_branch(repo_root)
 
     def _safe(fn, *args) -> None:
         try:
             fn(*args)
-        except Exception:  # noqa: BLE001 — Stop hook は必ず exit 0
+        except Exception:  # noqa: BLE001, S110 — Stop hook は必ず exit 0
             pass
 
     def _timed(phase: str, fn, *args) -> None:
@@ -506,157 +230,45 @@ def _run_heavy_work(repo_root: str, brief: Path) -> None:
         start = time.monotonic()
         try:
             fn(*args)
-        except Exception:  # noqa: BLE001 — Stop hook は必ず exit 0
+        except Exception:  # noqa: BLE001, S110 — Stop hook は必ず exit 0
             pass
         finally:
             _log_profile(phase, (time.monotonic() - start) * 1000.0)
 
     def _sequential_branch_cleanups() -> None:
-        _timed("cleanup_gone_branches", _cleanup_gone_branches, repo_root, default_branch)
-        _timed("cleanup_merged_pr_branches", _cleanup_merged_pr_branches, repo_root, default_branch)
+        _timed(
+            "cleanup_gone_branches", _cleanup_gone_branches, repo_root, default_branch
+        )
+        _timed(
+            "cleanup_merged_pr_branches",
+            _cleanup_merged_pr_branches,
+            repo_root,
+            default_branch,
+        )
 
     def _write_brief_task() -> None:
         _timed("write_brief", _write_brief, repo_root, brief)
 
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="on-stop") as ex:
-        futures = [
-            ex.submit(_sequential_branch_cleanups),
-            ex.submit(_write_brief_task),
-        ]
+        futures = []
+        if branch_cleanup_enabled:
+            futures.append(ex.submit(_sequential_branch_cleanups))
+        if brief_enabled:
+            futures.append(ex.submit(_write_brief_task))
         for f in futures:
             try:
                 f.result()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — Stop hook は必ず exit 0
                 pass
 
 
-_MAX_RESUME_ATTEMPTS = 3
+def _read_bool_hook_config(key: str, *, default: bool) -> bool:
+    """hooks-config（config.json）の bool キーを読む共通ヘルパー（Issue #2955）.
 
-
-def _detect_orphan_issue_next_state(repo_root: str) -> int:
-    """Issue #1698: `cache/issue-next-state.json` の孤児 state を検出して auto-resume 指示を注入する.
-
-    孤児 state = `current_issue` に着手中番号があるが、対応する worktree（branch 名に
-    `issue-<N>-` を含む）と open PR（本文に `closes #<N>` を含む）の両方が存在しない状態。
-
-    `/issue-next` の STEP 1.5 (品質チェック) で PASS コメント投稿後に turn が終了
-    してしまうと発生する（Issue #1558 で実際に確認）。
-
-    旧実装（Issue #1561）の stderr WARN は Claude Code UI に表示されないため無効だった。
-    本実装（Issue #1698）では Stop hook exit 2 を返して stop をブロックし、stderr に
-    auto-resume 指示（具体的な git worktree add コマンドを含む）を注入する。
-
-    fail-safe: `resume_attempts` が _MAX_RESUME_ATTEMPTS (3) 以上の場合は exit 0 に落とし
-    無限ループを防ぐ。
-
-    Returns:
-        int: 孤児 state を検出し自動再開を試みる場合は 2、それ以外は 0。
-             例外が発生した場合は常に 0（fail-safe）。
-    """
-    state_path = Path(repo_root) / "cache" / "issue-next-state.json"
-    if not state_path.is_file():
-        return 0
-
-    try:
-        raw = state_path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (OSError, json.JSONDecodeError):
-        return 0
-    if not isinstance(data, dict):
-        return 0
-
-    current = data.get("current_issue")
-    if current is None:
-        return 0
-    try:
-        issue_num = int(current)
-    except (TypeError, ValueError):
-        return 0
-    if issue_num <= 0:
-        return 0
-
-    # worktree 検出: `git worktree list --porcelain` の branch 名に `issue-<N>-` を含むか。
-    # worktree のディレクトリ名も `<repo>-issue-<N>-<slug>` 形式なので、branch 名検査で
-    # SKILL の推奨形式をカバーできる。
-    rc, out, _ = _git(repo_root, "worktree", "list", "--porcelain", timeout=5)
-    if rc == 0:
-        marker = f"issue-{issue_num}-"
-        for line in out.splitlines():
-            # `branch refs/heads/<name>` 形式
-            if line.startswith("branch refs/heads/") and marker in line:
-                return 0
-
-    # PR 検出: `gh pr list --search "closes #<N> in:body" --state open` が空でなければ存在。
-    # gh が未インストールの環境では false positive を避けるため「PR あり」扱いとする
-    # （gh 検出できないなら警告を出さない）。
-    if shutil.which("gh") is None:
-        return 0
-    rc_gh, out_gh = _gh(
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--search",
-        f"closes #{issue_num} in:body",
-        "--json",
-        "number",
-        timeout=8,
-    )
-    if rc_gh == 0:
-        try:
-            parsed = json.loads(out_gh or "[]")
-        except json.JSONDecodeError:
-            parsed = []
-        if isinstance(parsed, list) and len(parsed) > 0:
-            return 0
-
-    # ここまで到達 = worktree なし + open PR なし → 孤児 state
-    # resume_attempts を確認して fail-safe ロジックを適用する
-    try:
-        resume_attempts = int(data.get("resume_attempts") or 0)
-    except (TypeError, ValueError):
-        resume_attempts = 0
-
-    if resume_attempts >= _MAX_RESUME_ATTEMPTS:
-        # fail-safe: 3 回超で exit 0 に落とし無限ループを防ぐ
-        sys.stderr.write(
-            f"on-stop: WARN: Resume attempts exceeded for #{issue_num} "
-            f"(resume_attempts={resume_attempts} >= {_MAX_RESUME_ATTEMPTS}). "
-            f"Manual intervention required. See {state_path}.\n"
-        )
-        return 0
-
-    # resume_attempts をインクリメントして state ファイルを更新する
-    data["resume_attempts"] = resume_attempts + 1
-    try:
-        state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError:
-        pass  # 書き込み失敗は無視（重要なのは exit 2 で auto-resume を注入すること）
-
-    # exit 2 で stop をブロックし、stderr に auto-resume 指示を注入する（Issue #1698）
-    # Claude Code の Stop hook exit 2 は stop をブロックして stderr を Claude のコンテキストに
-    # 注入する仕様を利用する。
-    repo_name = Path(repo_root).name
-    worktree_dir = f"../{repo_name}-issue-{issue_num}-<slug>"
-    worktree_cmd = (
-        f"git worktree add -b fix/issue-{issue_num}-<slug> {worktree_dir} origin/main"
-    )
-    sys.stderr.write(
-        f"on-stop: Orphan issue-next state detected for #{issue_num} "
-        f"(no worktree, no open PR). "
-        f"Attempt {resume_attempts + 1}/{_MAX_RESUME_ATTEMPTS}. "
-        f"Resuming STEP 2 now: {worktree_cmd}\n"
-        f"Please execute: {worktree_cmd}\n"
-        f"Then continue with /issue-next STEP 2 (worktree creation) for Issue #{issue_num}.\n"
-    )
-    return 2
-
-
-def _read_slack_enabled() -> bool:
-    """Slack 通知の有効判定（Issue #1994: hooks-config.json 優先・env var は deprecated）.
-
-    hooks-config.json の ``"on-stop-slack"`` キーを get_hook_config で読む。
-    未設定（None）なら env var ``ON_STOP_SLACK_ENABLED`` にフォールバックする。
+    on-stop.py の各サブ機能（Slack 通知・孤児 state 検出・ブランチ掃除・brief 生成）を
+    個別に on/off するために使う。``hook_io.get_hook_config`` へ委譲し、設定ファイル
+    なし・キーなし・不正 JSON・解決失敗時は ``default`` にフォールバックする
+    （Stop hook は常に fail-safe で継続する）。
     """
     try:
         _lib_dir = Path(__file__).resolve().parent / "_lib"
@@ -664,20 +276,45 @@ def _read_slack_enabled() -> bool:
             sys.path.insert(0, str(_lib_dir))
         from hook_io import get_hook_config  # type: ignore[import-not-found]
 
-        config_value = get_hook_config("on-stop-slack", default=None)
+        config_value = get_hook_config(key, default=default)
     except Exception:  # noqa: BLE001 — Stop hook は fail-safe
-        config_value = None
-    if config_value is not None:
-        return bool(config_value)
-    return os.environ.get("ON_STOP_SLACK_ENABLED", "0") == "1"
+        return default
+    return bool(config_value)
+
+
+def _read_slack_enabled() -> bool:
+    """Slack 通知の有効判定（Issue #2497: config.json 一元管理・env var 廃止）.
+
+    ``~/.config/tidd_tools/config.json`` の ``"on-stop-slack"`` キーを
+    ``_read_bool_hook_config`` 経由で読む。未設定または解決失敗時は False
+    （default OFF・opt-in）。Issue #2955: 他サブ機能と同じ共通ヘルパーへ統合。
+
+    旧 env var ``ON_STOP_SLACK_ENABLED`` は #2497 で完全に廃止した（後方互換なし）。
+    """
+    return _read_bool_hook_config("on-stop-slack", default=False)
+
+
+def _detect_orphan_issue_next_state_gated(repo_root: str) -> int:
+    """`on-stop-orphan-detect` が有効な場合のみ孤児 state 検出を実行する（Issue #2955）.
+
+    default True（従来どおり常時実行）。無効化されている場合は何もせず 0 を返す。
+    """
+    if not _read_bool_hook_config("on-stop-orphan-detect", default=True):
+        return 0
+    try:
+        return _detect_orphan_issue_next_state(repo_root)
+    except Exception:  # noqa: BLE001 — Stop hook は fail-safe で exit 0
+        return 0
 
 
 def main() -> int:
-    raw_stdin = _drain_stdin()
+    # Issue #2957: stdin 読み取りを hook_io.read_stop_hook_input へ集約
+    # （isatty 対応・Stop schema 不一致は WARN のみで exit しない）。
+    stop_payload = read_stop_hook_input()
 
     # Slack 通知判定
     if _read_slack_enabled():
-        stop_reason = _extract_stop_reason(raw_stdin)
+        stop_reason = str(stop_payload.get("stop_reason") or "")
         webhook = (
             os.environ.get("CLAUDE_WEBHOOK_URL")
             or os.environ.get("SLACK_WEBHOOK_URL")
@@ -685,28 +322,36 @@ def main() -> int:
         )
         if stop_reason == "input_required" and webhook:
             _notify_slack(webhook)
-            print("on-stop: slack 通知を送信しました (stop_reason=input_required)")
+            print(
+                "on-stop: slack 通知を送信しました (stop_reason=input_required)",
+                file=sys.stderr,
+            )
         else:
             # 有効化されていることを毎回可視化する（Issue #1994 受け入れ基準）
             print(
                 f"on-stop: slack 通知は有効です（今回は送信条件を満たさず送信せず: "
-                f"stop_reason={stop_reason or '(なし)'}, webhook={'設定済み' if webhook else '未設定'}）"
+                f"stop_reason={stop_reason or '(なし)'}, webhook={'設定済み' if webhook else '未設定'}）",
+                file=sys.stderr,
             )
 
-    # リポジトリルート
+    # Issue #2466: merge-summary 転記チェックは throttle の外で毎回走る（軽量）。
+    # git rev-parse より前に実行することで、ISSUE_NEXT_STATE_ROOT 環境変数のみで動作できる。
+    # marker ファイルが存在し、transcript_path から直近 assistant メッセージを読み、
+    # 合計行との厳密一致を確認する。不一致なら exit 2 で再指示を注入する。
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return 0
-    if result.returncode != 0:
-        return 0
-    repo_root = result.stdout.strip()
+        merge_summary_exit_code = _check_merge_summary_in_transcript(stop_payload)
+    except Exception:  # noqa: BLE001 — Stop hook は fail-safe で exit 0
+        merge_summary_exit_code = 0
+    if merge_summary_exit_code != 0:
+        return merge_summary_exit_code
+
+    # リポジトリルート（Issue #2958: `_lib/git_helpers.py` の `git_toplevel()` に委譲）
+    _lib_dir = Path(__file__).resolve().parent / "_lib"
+    if str(_lib_dir) not in sys.path:
+        sys.path.insert(0, str(_lib_dir))
+    from git_helpers import git_toplevel  # type: ignore[import-not-found]
+
+    repo_root = git_toplevel()
     if not repo_root:
         return 0
 
@@ -714,10 +359,8 @@ def main() -> int:
     # 軽量（state file の JSON parse + git worktree list + gh pr list --search 1 回）で、
     # 孤児 state を検出したら exit 2 + stderr で auto-resume 指示を注入する。
     # 3 回超の場合は fail-safe で exit 0 に落とす。
-    try:
-        orphan_exit_code = _detect_orphan_issue_next_state(repo_root)
-    except Exception:  # noqa: BLE001 — Stop hook は fail-safe で exit 0
-        orphan_exit_code = 0
+    # Issue #2955: `on-stop-orphan-detect` キーで個別 gating 可能（default True）。
+    orphan_exit_code = _detect_orphan_issue_next_state_gated(repo_root)
     if orphan_exit_code != 0:
         return orphan_exit_code
 

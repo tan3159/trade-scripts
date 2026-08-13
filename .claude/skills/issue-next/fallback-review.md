@@ -1,8 +1,11 @@
 # agy クォータ上限時の Claude フォールバック（STEP 5 詳細）
 
-`/issue-next` の STEP 5 詳細フロー。`tidd ai-review` が **exit code 3** を返した場合のみ読む。
-
-**CRITICAL: exit code 3 のみが対象。exit 1（REQUEST_CHANGES）や exit 2（エスカレーション）では絶対に起動しない。**
+> **起動は hook で機械強制されています（#3629）:** exit 3 の際に
+> `~/.cache/tidd/ai-reviewer/pr-<N>/backend-unavailable` 証跡フラグが作成され、
+> PreToolUse hook（`.claude/hooks/block-unauthorized-fallback-review.py`）がフラグの有無で
+> `ai-fallback-reviewer` の起動を許可/ブロックします。**prompt には必ず
+> `PR番号: <PR番号>` を含めてください**（hook が PR 番号を抽出してフラグを確認するため・
+> 抽出できない場合は fail-closed でブロックされます）。
 
 ## 目次
 
@@ -32,12 +35,16 @@ exit 2 = スマートガードレール発動（最大試行回数超過・同�
 ### 1. ai-fallback-reviewer subagent の起動
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="ai_fallback_reviewer", task_name="ai_fallback_reviewer", message=...) に読み替え
   subagent_type="ai-fallback-reviewer",
   description="PR #<PR番号> のフォールバックレビュー",
-  prompt="<mcp__github__get_pull_request の PR 本文> と <mcp__github__get_pull_request_diff の diff>"
+  prompt="PR番号: <PR番号>\n<mcp__github__get_pull_request の PR 本文> と <mcp__github__get_pull_request_diff の diff>"
 )
 ```
+
+**prompt 冒頭の `PR番号: <PR番号>` は必須**（#3629）。block-unauthorized-fallback-review.py hook が
+この文字列から PR 番号を抽出して `backend-unavailable` 証跡フラグを確認する。抽出できないと
+fail-closed で起動がブロックされる。
 
 subagent は JSON `{"verdict": "APPROVE|REQUEST_CHANGES", "issues": [...], "rationale": "..."}` を最終コードブロックで返す。
 
@@ -78,11 +85,11 @@ VERDICT: APPROVE または REQUEST_CHANGES
 ### 3. backend-name を記録する
 
 ```bash
-mkdir -p "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<PR番号>"
-printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/ai-dev-handbook/ai-reviewer/pr-<PR番号>/backend-name"
+mkdir -p "${HOME}/.cache/tidd/ai-reviewer/pr-<PR番号>"
+printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/tidd/ai-reviewer/pr-<PR番号>/backend-name"
 ```
 
-（注: macOS では `~/Library/Caches/ai-dev-handbook/` に解決される。`_state_dir()` = `tidd_tools.shared.paths.cache_dir() / "ai-reviewer" / f"pr-{PR番号}"` が実 path を返す。Issue #1754）
+（注: macOS では `~/Library/Caches/tidd/` に解決される。`_state_dir()` = `tidd_tools.shared.paths.cache_dir() / "ai-reviewer" / f"pr-{PR番号}"` が実 path を返す。Issue #1754）
 
 ### 4. VERDICT に応じてリトライループを継続する
 

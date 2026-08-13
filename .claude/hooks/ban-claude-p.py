@@ -2,6 +2,8 @@
 """PreToolUse hook: git commit 前に claude -p / --print の使用を検出してブロックする.
 
 旧 ban-claude-p.sh を 1:1 で踏襲する（Phase 4 / #1057 で Python 化）。Issue #565・#957。
+Issue #2443: worktree 盲目対策 — `_lib.hook_io.resolve_target_cwd` で対象リポジトリの
+CWD を解決してから git を実行する（コマンド解析 → payload `cwd` → プロセス CWD）。
 
 検出対象: リポジトリ全体のステージング済みファイル（index 内容を検査する）
 除外対象:
@@ -19,15 +21,26 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_command, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.git_helpers import git_toplevel
+from _lib.git_helpers import run_git as _run_git
+from _lib.hook_io import (
+    get_command,
+    is_hook_enabled,
+    read_hook_input,
+    resolve_target_cwd,
+)
 
 # 旧 sh: grep -qE '(^|&&|;|\|)\s*git commit(\s|$)'
-_GIT_COMMIT_RE = re.compile(r"(^|&&|;|\|)\s*git commit(\s|$)")
+# Issue #2443（PR #2455 レビュー指摘）: worktree コミットで多用される
+# `git -C <path> commit` も入口判定に一致させる（パス表現は
+# _lib.hook_io._GIT_DASH_C_RE と同じ: "…" / '…' / 非空白列）。
+_GIT_COMMIT_RE = re.compile(
+    r"(^|&&|;|\|)\s*git\s+(?:-C\s+(?:\"[^\"]+\"|'[^']+'|\S+)\s+)?commit(\s|$)"
+)
 
 # 旧 sh の grep パターン:
 #   'claude[[:space:]]+(-p[[:space:]"\'`]|-p$|--print[[:space:]"\'`]|--print$)'
@@ -46,20 +59,14 @@ _EXCLUDE_DIR_FRAGMENTS = (
 _SELF_PATHS = (
     ".claude/hooks/ban-claude-p.sh",
     ".claude/hooks/ban-claude-p.py",
+    "templates/workflow/.claude/hooks/ban-claude-p.py",  # Issue #2486: copier 配布先も除外
 )
 
 
 def _git(*args: str, cwd: str | None = None) -> tuple[int, str]:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=20,
-            cwd=cwd,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    """Issue #2958: subprocess 実行部は `_lib.git_helpers.run_git()` に委譲する."""
+    result = _run_git(*args, cwd=cwd, timeout=20)
+    if result is None:
         return 1, ""
     return result.returncode, result.stdout
 
@@ -84,10 +91,10 @@ def _main() -> int:
     if not _GIT_COMMIT_RE.search(command):
         return 0
 
-    rc, root_out = _git("rev-parse", "--show-toplevel")
-    if rc != 0:
-        return 0
-    git_root = root_out.strip()
+    # Issue #2443: hook プロセスはセッション CWD（メイン checkout）で動くため、
+    # worktree コミットの staged 内容を検査できるよう対象リポジトリの CWD を解決する。
+    target_cwd = resolve_target_cwd(payload, command)
+    git_root = git_toplevel(cwd=target_cwd)
     if not git_root:
         return 0
 

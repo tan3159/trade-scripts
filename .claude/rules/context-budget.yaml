@@ -1,9 +1,25 @@
-# コンテキスト予算閾値（Issue #1978 最終固定値・親 #1872）
-# est_tokens = 非ASCII文字数 + ASCII文字数/4（保守的方式・決定的）
-# #1978 で 2 ファイル圧縮完了。warn 7500/1000・hard 8000/1100 で最終固定。
+# コンテキスト予算閾値（Issue #1978 で導入・#3642 で推定式校正に合わせ再設定・#3643 で import 再帰解決を計測対象に追加）
+# est_tokens = 0.923 * 非ASCII文字数 + 0.547 * ASCII文字数（#3642 校正・実トークナイザ近似）
+# 旧式（非ASCII 1 = 1 token・ASCII 4 = 1 token）は実トークンを約 27% 過小評価していた。
+# #3642 で閾値を変更: total_warn 7500→10000・total_hard 8000→11000・
+# file_warn 1000→1500・file_hard 1100→1600（現行 9 ファイル合計 ≈ 9.7k・最大単体 ≈ 1.44k
+# を切り上げた値。現状値を下回らないようにし、以降の増加を止めるラチェット運用）。
+# #3643 で CLAUDE.md の @import 再帰解決を計測対象に追加し、合計に
+# docs/personal/s-tanaka/CLAUDE.md（≈0.34k）と .rulesync/rules/overview.md（≈1.59k）が加算された。
+# 2026-08-11 実測合計 ≈ 11.78k・最大単体 ≈ 1.59k（overview.md）を切り上げて再設定:
+# total_warn 10000→12000・total_hard 11000→13000・file_warn 1500→1700・file_hard 1600→1800。
+# overview.md は per-file HARD（1.8k）を下回るため本文圧縮は行わない（#3643 スコープ外）。
+# 肥大して 1.8k を超えそうになったら別 Issue で圧縮を検討する。
 # 更新手順: docs/reference/context-budget.md / 決定記録: docs/decisions/2026-07-10-context-token-budget.md
-total_warn: 7500
-file_warn: 1000
+total_warn: 12000
+file_warn: 1700
+# メモリ予算 WARN 閾値（SessionStart hook session-start-memory-warn・Issue #3659）
+# ~/.claude/projects/<repo変換名>/memory/MEMORY.md の est tokens 超過を stdout に WARN する。
+# MEMORY.md は AutoMem が自動生成し PR 差分に現れないため HARD gate（PR gate）には載せない
+# （WARN 段のみ・#3644 調査の結論）。超過時は tidd memory-triage で棚卸し候補を確認する。
+# ラチェット運用（#3642 と同様）: #3659 棚卸し後実測 ≈ 2,253 est tokens を切り上げた値。
+# 現状値を下回らないようにし、以降の増加を止める。
+memory_total_warn: 2400
 # HARD 閾値（tidd context-budget --check / test-plan PR gate が exit 1 でブロック）
-total_hard: 8000
-file_hard: 1100
+total_hard: 13000
+file_hard: 1800

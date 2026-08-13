@@ -1,29 +1,9 @@
 # CodeRabbit マージ後スクリーニング（use_coderabbit=true consumer限定・Issue #2340）
 
-`use_coderabbit=true` の consumer では CodeRabbit の advisory レビュー（2〜5分）が
-`tidd ai-review` の auto-merge より遅れることがある。1 Issue 1 セッション運用ではマージ後に
-PR コメントを見返すトリガーがないため、遅着した妥当な指摘が放置されてしまう。マージを待たせず
-取りこぼしもなくすため、STEP 6（マージ完了・所要時間サマリ出力後）に本手順を実行する。
-
-## 目次
-
-- [実行条件](#実行条件)
-- [STEP A: CodeRabbit レビュー完了のポーリング（上限あり）](#step-a-coderabbit-レビュー完了のポーリング上限あり)
-- [STEP B: CodeRabbit 指摘の取得](#step-b-coderabbit-指摘の取得)
-- [STEP C: coderabbit-screening-reviewer subagent で分類](#step-c-coderabbit-screening-reviewer-subagent-で分類)
-- [STEP D: 妥当分の Issue 起票](#step-d-妥当分の-issue-起票)
-- [STEP E: 判定記録を計測用 Issue へ投稿](#step-e-判定記録を計測用-issue-へ投稿)
-
----
-
-## 実行条件
-
-consumer リポジトリの直下に `.coderabbit.yaml` が存在する場合のみ実行する。存在しない場合は
-本手順を完全にスキップする（CodeRabbit 未導入 consumer への影響ゼロ）。
-
-```bash
-test -f .coderabbit.yaml && echo "coderabbit-enabled" || echo "coderabbit-disabled"
-```
+`tidd cleanup-merged-branch` の出力（stderr）に `coderabbit-screening: required` が含まれる
+場合のみ実行する。含まれない場合は本手順を完全にスキップする（CodeRabbit 未導入 consumer
+への影響ゼロ）。判定は cleanup-merged-branch がリポジトリルート直下の `.coderabbit.yaml`
+有無を機械的に行うため、`test -f` での手動判定は不要（#3637）。
 
 ## STEP A: CodeRabbit レビュー完了のポーリング（上限あり）
 
@@ -66,7 +46,7 @@ gh api repos/{owner}/{repo}/pulls/<PR番号>/comments \
 通してから subagent プロンプトへ埋め込む。
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="coderabbit_screening_reviewer", task_name="coderabbit_screening_reviewer", message=...) に読み替え
   subagent_type="coderabbit-screening-reviewer",
   description="PR #<PR番号> の CodeRabbit 指摘スクリーニング",
   prompt="PR #<PR番号> の CodeRabbit 指摘一覧:\n<STEP B の JSON（sanitize 済み）>"
@@ -80,21 +60,13 @@ subagent は各指摘を `妥当` / `誤検知` / `スコープ外` に分類し
 
 `classification == "妥当"` の指摘のみ、`.claude/rules/issue-creation.md` 準拠で起票する:
 
-```bash
-gh issue create --repo {owner}/{repo} \
-  --title "fix: <suggested_issue_title>" \
-  --body "$(cat <<'EOF'
-## 背景
-
-CodeRabbit マージ後スクリーニング（PR #<PR番号>）で妥当と判定された指摘:
-<reason>
-
-## やること
-
-- [ ] <suggested_issue_title> を修正する
-EOF
-)" \
-  --label "type: fix" --label "priority: low" --label "source: rework"
+```
+mcp__github__create_issue({
+  owner, repo,
+  title: "fix: <suggested_issue_title>",
+  body: "## 背景\n\nCodeRabbit マージ後スクリーニング（PR #<PR番号>）で妥当と判定された指摘:\n<reason>\n\n## やること\n\n- [ ] <suggested_issue_title> を修正する",
+  labels: ["type: fix", "priority: low", "source: rework"]
+})
 ```
 
 起票した Issue 番号を控え、STEP E の判定記録に含める（起票が 0 件なら「なし」と記録する）。

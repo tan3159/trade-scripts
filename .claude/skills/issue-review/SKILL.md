@@ -3,25 +3,8 @@ name: issue-review
 description: GitHub Issue の品質を意味的に評価する（Pain の深さ・Gherkin の検証可能性）。Anthropic API 直接呼び出しは廃止し、Claude Code の Agent tool で issue-reviewer subagent を起動する（Issue #1301 で全廃）。
 ---
 
-# /issue-review
-
-引数として Issue 番号（例: `/issue-review 1234`）を受け取り、`.claude/rules/issue-creation.md`
-の判定基準に従って意味的品質チェックを実行し、Issue にコメントを投稿する。
-
-**背景:** 従来は `tidd issue-quality-check` サブコマンドが Anthropic API を直接叩いていた
-が、Issue #1301 で全廃した。代わりに Claude Code の Agent tool で `issue-reviewer` subagent
-を起動し、Claude Max サブスク枠内で処理する。
-
-## 引数
-
-- `<N>`: 品質チェックする Issue 番号（必須）
-
-## 手順
-
-### STEP 1: Issue 情報を取得
-
-```bash
-gh issue view <N> --json title,body,labels
+```
+mcp__github__get_issue({owner, repo, issue_number: <N>})
 ```
 
 取得した title / body / labels を context として保持する。
@@ -36,7 +19,7 @@ gh issue view <N> --json title,body,labels
 Agent tool を以下のように呼ぶ:
 
 ```text
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_reviewer", task_name="issue_reviewer", message=...) に読み替え
   subagent_type="issue-reviewer",
   description="Issue #<N> の品質チェック",
   prompt=<Issue の title/body/labels/type を含むプロンプト>
@@ -52,42 +35,33 @@ Agent(
   "pain_reason": "...",
   "gherkin_issues": ["..."],
   "boundary_missing": false,
-  "boundary_reason": "..."
+  "boundary_reason": "...",
+  "prose_only_unjustified": false,
+  "prose_only_reason": "...",
+  "size_over_1000_possible": false,
+  "size_reason": "..."
 }
 ```
 
 - `boundary_missing` (Issue #1288・#1378): critical モジュール（`tidd_tools/ai_review/**`・
   `.claude/hooks/validate-issue.py`・`.claude/hooks/require-issue.py`）を `## 参照` に含む Issue で、
   境界値異常系 Scenario が `## 振る舞い` に含まれていない場合に `true`。`true` の場合 FAIL 扱い。
+- **PASS の場合（size_over_1000_possible が false）:**
 
-### STEP 4: Issue にコメントを投稿
-
-判定結果に応じて以下のコメントを投稿する:
-
-- **PASS の場合:**
-
-```bash
-gh issue comment <N> --body "## Issue品質チェック結果
-
-✅ このIssueは実装可能な状態です。
-
-\`/issue-next\` で着手してください（\`🙋 needs-human-input\` がなければ自動選定されます）。"
+```
+mcp__github__add_issue_comment({owner, repo, issue_number: <N>, body: "## Issue品質チェック結果\n\n✅ このIssueは実装可能な状態です。\n\n`/issue-next` で着手してください（`🙋 needs-human-input` がなければ自動選定されます）。"})
 ```
 
-- **FAIL の場合:** subagent が返した `pain_reason` / `gherkin_issues` / `boundary_reason` を列挙する:
+- **PASS の場合（size_over_1000_possible が true）:** PASS コメントに加えて、**非ブロッキングの分割提案**を追記する:
 
-```bash
-gh issue comment <N> --body "## Issue品質チェック結果
+```
+mcp__github__add_issue_comment({owner, repo, issue_number: <N>, body: "## Issue品質チェック結果\n\n✅ このIssueは実装可能な状態です。\n\n`/issue-next` で着手してください（`🙋 needs-human-input` がなければ自動選定されます）。\n\n---\n\n### 規模の目安（非ブロッキング）\n\n実装規模が 1000 行を超える可能性があります（<size_reason>）。\n`docs/reference/pr-splitting-guide.md` を参照し、PR を分割できないか検討してください。\n着手はブロックされません。分割するかどうかは実装者の判断に委ねます。"})
+```
 
-❌ このIssueは以下の点を修正してください。
+- **FAIL の場合:** subagent が返した `pain_reason` / `gherkin_issues` / `boundary_reason` / `prose_only_reason` を列挙する。`size_over_1000_possible` は FAIL 理由に含めない:
 
-### 修正が必要な項目
-
-- <pain_reason>
-- <gherkin_issues の各項目>
-- <boundary_missing == true の場合は boundary_reason を追記>
-
-修正後、\`/issue-review <N>\` を再実行してください。"
+```
+mcp__github__add_issue_comment({owner, repo, issue_number: <N>, body: "## Issue品質チェック結果\n\n❌ このIssueは以下の点を修正してください。\n\n### 修正が必要な項目\n\n- <pain_reason>\n- <gherkin_issues の各項目>\n- <boundary_missing == true の場合は boundary_reason を追記>\n- <prose_only_unjustified == true の場合は prose_only_reason を追記>\n\n修正後、`/issue-review <N>` を再実行してください。"})
 ```
 
 ### STEP 5: 終了
@@ -106,5 +80,5 @@ Claude Code の Agent tool 経由で subagent を起動することで、Claude 
 - `.claude/agents/issue-reviewer.md` — subagent 定義
 - `.claude/rules/issue-creation.md` — 判定基準
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- [docs/reference/issue-review-skill.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-review-skill.md) — 詳細ドキュメント
+- docs/reference/issue-review-skill.md — 詳細ドキュメント
 - `tidd_tools.issue_quality_check` モジュール — 互換性スタブ（常に PASS）

@@ -15,7 +15,7 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 # Issue #1460: 全 override marker の統一 regex パターン。
 # - `<!--` と `-->` の間の空白・改行を吸収
@@ -25,11 +25,17 @@ from typing import Iterable
 # - marker 名は f-string の呼び出し側が渡す（re.escape で埋め込み）
 
 
-def compile_marker_regex(marker_name: str) -> re.Pattern[str]:
+def compile_marker_regex(
+    marker_name: str, *, single_line: bool = False
+) -> re.Pattern[str]:
     """指定 marker 名の統一 regex パターンを compile する.
 
     Args:
         marker_name: 例 ``"allow-test-update"``・``"allow-single-commit"``
+        single_line: True の場合、marker が改行を跨がない 1 行完結の書式のみを
+            受理する（Issue #2954）。Issue 本文のような未信頼度の高い入力を
+            扱う hook（例: `validate-issue.py`）向けに、複数行にまたがる理由文
+            を意図的に許容しないための厳格モード。
 
     Returns:
         `re.Pattern` — `pattern.search(body)` で marker + reason を検出する。
@@ -39,15 +45,23 @@ def compile_marker_regex(marker_name: str) -> re.Pattern[str]:
         理由部分は ``(?:(?!-->).)+?`` で ``-->`` を跨がないように制限する。
         naive な ``(.+?)`` + ``re.DOTALL`` だと理由が空のマーカーの後に別の
         HTML コメントがあると跨ってマッチして意図せず bypass する。
+        `single_line=True` では `.` の代わりに `[^\\n]` を使い、かつ marker 名前後・
+        コロン前後の空白も水平空白 (`[ \\t]`) のみに限定して改行を一切許容しない。
     """
     escaped = re.escape(marker_name)
+    if single_line:
+        return re.compile(
+            rf"<!--[ \t]*{escaped}[ \t]*:[ \t]*((?:(?!-->)[^\n])+?)[ \t]*-->",
+        )
     return re.compile(
         rf"<!--\s*{escaped}\s*:\s*((?:(?!-->).)+?)\s*-->",
         re.DOTALL,
     )
 
 
-def has_override_marker(body: str, marker_name: str) -> bool:
+def has_override_marker(
+    body: str, marker_name: str, *, single_line: bool = False
+) -> bool:
     """PR ボディに指定 marker が「有効書式で」含まれるか判定する.
 
     無効書式（コロンなし・空理由）は False を返す。
@@ -55,7 +69,7 @@ def has_override_marker(body: str, marker_name: str) -> bool:
     """
     if not body:
         return False
-    pattern = compile_marker_regex(marker_name)
+    pattern = compile_marker_regex(marker_name, single_line=single_line)
     m = pattern.search(body)
     if m is None:
         return False
@@ -63,7 +77,9 @@ def has_override_marker(body: str, marker_name: str) -> bool:
     return bool(reason)
 
 
-def extract_reason(body: str, marker_name: str) -> str | None:
+def extract_reason(
+    body: str, marker_name: str, *, single_line: bool = False
+) -> str | None:
     """有効な marker から理由文字列を抽出する.
 
     Returns:
@@ -71,7 +87,7 @@ def extract_reason(body: str, marker_name: str) -> str | None:
     """
     if not body:
         return None
-    pattern = compile_marker_regex(marker_name)
+    pattern = compile_marker_regex(marker_name, single_line=single_line)
     m = pattern.search(body)
     if m is None:
         return None
@@ -117,6 +133,8 @@ def find_invalid_syntax(body: str, marker_names: Iterable[str]) -> list[str]:
         return []
     invalid: list[str] = []
     for name in marker_names:
-        if _compile_invalid_pattern(name).search(body) and not has_override_marker(body, name):
+        if _compile_invalid_pattern(name).search(body) and not has_override_marker(
+            body, name
+        ):
             invalid.append(name)
     return invalid

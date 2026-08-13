@@ -145,12 +145,18 @@ def check_skill_md(content: str, file_path: str) -> list[str]:
 
     name = fm.get("name", "")
     if not name:
-        errors.append("SKILL.md の YAML frontmatter に name フィールドが必要です。\n例: name: my-skill")
+        errors.append(
+            "SKILL.md の YAML frontmatter に name フィールドが必要です。\n例: name: my-skill"
+        )
     else:
         if len(name) > NAME_MAX_CHARS:
-            errors.append(f"name が {NAME_MAX_CHARS} 文字を超えています（現在: {len(name)} 文字）。")
+            errors.append(
+                f"name が {NAME_MAX_CHARS} 文字を超えています（現在: {len(name)} 文字）。"
+            )
         if not _NAME_RE.match(name):
-            errors.append(f"name は小文字英字・数字・ハイフンのみ使用できます（現在: {name!r}）。")
+            errors.append(
+                f"name は小文字英字・数字・ハイフンのみ使用できます（現在: {name!r}）。"
+            )
         for reserved in RESERVED_NAME_WORDS:
             if reserved in name:
                 errors.append(
@@ -165,7 +171,9 @@ def check_skill_md(content: str, file_path: str) -> list[str]:
             "例: description: Does something when needed"
         )
     elif len(description) > DESCRIPTION_MAX_CHARS:
-        errors.append(f"description が {DESCRIPTION_MAX_CHARS} 文字を超えています（現在: {len(description)} 文字）。")
+        errors.append(
+            f"description が {DESCRIPTION_MAX_CHARS} 文字を超えています（現在: {len(description)} 文字）。"
+        )
 
     depth_errors = check_reference_depth(content, file_path)
     errors.extend(depth_errors)

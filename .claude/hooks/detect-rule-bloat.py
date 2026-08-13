@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import (  # noqa: E402
+from _lib.hook_io import (
     get_file_path,
     get_tool_name,
     is_hook_enabled,
@@ -164,10 +164,17 @@ def _check_keywords(file_path: str, keywords: list[dict[str, str]]) -> list[str]
     return warnings
 
 
+# context_budget.py と同じ実トークナイザ近似係数（#3642 校正）。stdlib のみのため
+# tidd_tools から import せず定数を二重管理する。変更時は両者を同期すること。
+_NON_ASCII_TOKENS_PER_CHAR = 0.923
+_ASCII_TOKENS_PER_CHAR = 0.547
+
+
 def _estimate_tokens(text: str) -> float:
-    """est_tokens = 非ASCII文字数 + ASCII文字数/4（保守的方式・決定的）."""
+    """est_tokens = 0.923*非ASCII文字数 + 0.547*ASCII文字数（#3642 校正後）."""
     non_ascii = sum(1 for c in text if ord(c) >= 128)
-    return non_ascii + (len(text) - non_ascii) / 4
+    ascii_count = len(text) - non_ascii
+    return _NON_ASCII_TOKENS_PER_CHAR * non_ascii + _ASCII_TOKENS_PER_CHAR * ascii_count
 
 
 def _get_context_budget_yaml() -> Path:

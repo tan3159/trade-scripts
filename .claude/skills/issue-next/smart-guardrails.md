@@ -23,6 +23,11 @@ exit 3 = 全バックエンド利用不可 → Claude フォールバック起�
 
 **`tidd_tools ai-review` の終了コードの数値そのもの**（2 か 3 か）で分岐すること。
 
+> **フォールバック起動は hook で機械強制されています（#3629）:** exit 3 の証跡フラグ
+> （`~/.cache/tidd/ai-reviewer/pr-<N>/backend-unavailable`）が存在しない限り、
+> `.claude/hooks/block-unauthorized-fallback-review.py` が `ai-fallback-reviewer` の起動を
+> ブロックします（escape hatch: `SKIP_FALLBACK_REVIEW_GATE=1`）。
+
 | ケース | 終了コード | issue-next の動作 |
 |------|------|------|
 | agy クォータ超過・codex が REQUEST_CHANGES を3回 | exit 2 | 人間にエスカレーション（Claude Agent 起動禁止） |

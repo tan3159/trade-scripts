@@ -32,7 +32,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_file_path, get_tool_name, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.hook_io import (
+    get_file_path,
+    get_new_content,
+    get_tool_name,
+    is_file_edit_tool,
+    is_hook_enabled,
+    read_hook_input,
+)
 
 # `Path(__file__)[.resolve()].parents[<数字>]` を検出（.resolve() 任意・プレースホルダ `[N]` はマッチしない）
 _PARENTS_N_RE = re.compile(r"Path\(__file__\)(?:\.resolve\(\))?\.parents\[\d+\]")
@@ -42,15 +49,13 @@ _TARGET_PATH_RE = re.compile(r"(^|/)projects/py/tidd_tools/tests/.+\.py$")
 
 
 def _get_new_content(payload: dict) -> str | None:
-    """tool_input から Edit/Write の新内容を取り出す."""
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return None
-    for key in ("content", "new_string", "new_str", "replacement"):
-        value = tool_input.get(key)
-        if isinstance(value, str):
-            return value
-    return None
+    """Edit / Write / apply_patch の新内容を取り出す（Issue #3221）.
+
+    Claude Code の `content` / `new_string` 等と、Codex の apply_patch
+    （`tool_input.command` の patch 文字列から追加行を抽出）を共通ヘルパー
+    `hook_io.get_new_content()` に委譲する。
+    """
+    return get_new_content(payload)
 
 
 def _read_from_disk(file_path: str) -> str | None:
@@ -68,7 +73,7 @@ def _read_from_disk(file_path: str) -> str | None:
 def _main() -> int:
     payload = read_hook_input(hook_name="PreToolUse")
     tool_name = get_tool_name(payload)
-    if tool_name not in {"Edit", "Write"}:
+    if not is_file_edit_tool(tool_name):
         return 0
 
     file_path = get_file_path(payload)

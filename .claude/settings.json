@@ -4,14 +4,13 @@
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Read(**/.envrc)",
+      "Read(**/.mise.toml)",
       "Read(**/private-key.pem)",
       "Read(**/credentials.json)",
-      "Write(**/.env)",
-      "Write(**/.env.*)",
-      "Write(**/.envrc)",
       "Edit(**/.env)",
       "Edit(**/.env.*)",
       "Edit(**/.envrc)",
+      "Edit(**/.mise.toml)",
       "Bash(git push* --force)",
       "Bash(git push* -f *)",
       "Bash(git push* -f)",
@@ -19,11 +18,50 @@
       "Bash(git clean -f*)",
       "Bash(git branch -D*)",
       "Bash(rm -rf*)",
-      "Bash(sudo rm*)"
+      "Bash(sudo rm*)",
+      "Bash(env*)",
+      "Bash(printenv*)",
+      "Bash(set*)",
+      "Bash(export -p*)",
+      "Bash(declare -x*)"
+    ],
+    "allow": [
+      "Bash(tidd cleanup-merged-branch*)"
     ]
   },
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/memguard.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-subagent-prompt-contract.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-quality-check.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-unauthorized-fallback-review.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          }
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -33,11 +71,23 @@
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-dangerous-git.py\""
           },
           {
             "type": "command",
-            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-issue.py\""
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-subagent-review-merge.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-background-ai-review.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && TIDD_AGENT=codex python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/validate-issue.py\""
           },
           {
             "type": "command",
@@ -61,6 +111,14 @@
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-yaru-consistency.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-direct-yaru-tick.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-ruff-format.py\""
           },
           {
@@ -69,7 +127,19 @@
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && TIDD_AGENT=codex python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/detect-ai-confirm-misuse.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-issue-id-in-pr-title.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-closes-in-pr-body.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-no-xfail-stepdefs.py\""
           },
           {
             "type": "command",
@@ -82,6 +152,10 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-preflight-marker.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/check-dependency-allowlist.py\""
           }
         ]
       },
@@ -90,11 +164,37 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-issue-id-in-pr-title.py\""
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-closes-in-pr-body.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-tick-issue-items.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__issue_write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-direct-yaru-tick.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/block-unattended-escalation.py\""
           }
         ]
       },
@@ -107,7 +207,15 @@
           },
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-target-marker.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-shell-files.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-timing-mark-instruction.py\""
           },
           {
             "type": "command",
@@ -124,6 +232,22 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-ng-words.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/ban-hardcoded-repo.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/enforce-mcp-in-skills.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/check-dependency-allowlist.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/require-worktree-for-edit.py\""
           }
         ]
       }
@@ -134,7 +258,68 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/label-pr.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/stamp-merge-summary-session.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/sweep-merged-branches.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__create_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/label-pr.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__issue_write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__sub_issue_write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/record-timing-boundaries.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__github__merge_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/sweep-merged-branches.py\""
           }
         ]
       },
@@ -143,7 +328,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/auto-ruff-format.py\""
+          },
+          {
+            "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/detect-rule-bloat.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && TIDD_AGENT=codex python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/warn-diff-size.py\""
           }
         ]
       }
@@ -174,6 +367,22 @@
           {
             "type": "command",
             "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/notify-copier-staleness.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/session-start-cache.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/session-start-memory-warn.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/session-start-claude-local-md-warn.py\""
+          },
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/sync-global-tidd-entrypoints.py\""
           }
         ]
       }

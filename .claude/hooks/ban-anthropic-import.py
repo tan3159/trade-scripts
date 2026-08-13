@@ -26,7 +26,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_file_path, get_tool_name, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.hook_io import (
+    get_file_path,
+    get_new_content,
+    get_tool_name,
+    is_file_edit_tool,
+    is_hook_enabled,
+    read_hook_input,
+)
 
 # Python import 検出パターン
 # - `import anthropic` / `import anthropic as X` / `import os, anthropic` / `import anthropic, os` 等
@@ -63,15 +70,10 @@ def _get_new_content(payload: dict) -> str | None:
 
     Claude Code の Edit / Write tool のキー名は環境差があり得るため、
     `content` / `new_string` / `new_str` / `replacement` を順に見る。
+    Codex の apply_patch は共通ヘルパー `hook_io.get_new_content()` が
+    patch の追加行（+ 行）を返す（Issue #3221）。
     """
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return None
-    for key in ("content", "new_string", "new_str", "replacement"):
-        value = tool_input.get(key)
-        if isinstance(value, str):
-            return value
-    return None
+    return get_new_content(payload)
 
 
 def _read_from_disk(file_path: str) -> str | None:
@@ -85,6 +87,26 @@ def _read_from_disk(file_path: str) -> str | None:
         return p.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def _is_self_or_lib_path(file_path: str) -> bool:
+    """編集対象が hook 自身または `_lib/` 配下かを判定する（Issue #3226）.
+
+    apply_patch 等で新内容を取得できずディスクフォールバックに落ちる場合、
+    既存ファイル内容を検査対象にする。hook 自身・`_lib/` 配下は検出パターンの
+    ソース文字列を含むため、内容に違反がなくても常に誤検知してしまう。
+    これらのファイルへの編集はディスクフォールバックを skip する。
+    """
+    p = Path(file_path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    try:
+        resolved = p.resolve()
+    except OSError:
+        return False
+    own = Path(__file__).resolve()
+    lib_dir = own.parent / "_lib"
+    return resolved == own or lib_dir in resolved.parents
 
 
 def _check_python(content: str) -> str | None:
@@ -113,7 +135,7 @@ def _check_requirements_txt(content: str) -> str | None:
 def _main() -> int:
     payload = read_hook_input(hook_name="PreToolUse")  # Issue #1364
     tool_name = get_tool_name(payload)
-    if tool_name not in {"Edit", "Write"}:
+    if not is_file_edit_tool(tool_name):
         return 0
 
     file_path = get_file_path(payload)
@@ -130,6 +152,11 @@ def _main() -> int:
     # 新内容を取り出す（tool_input 経由 or ディスク）
     content = _get_new_content(payload)
     if content is None:
+        # Issue #3226: hook 自身・_lib/ 配下は検出パターンのソース文字列を
+        # 含むためディスクフォールバックで常に誤検知する。自身系への編集は
+        # フォールバックせず検査スキップする。
+        if _is_self_or_lib_path(file_path):
+            return 0
         content = _read_from_disk(file_path)
     if content is None:
         return 0

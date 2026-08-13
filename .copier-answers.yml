@@ -1,15 +1,19 @@
 # このファイルは copier が自動更新する。手動編集しないこと。
-_commit: v2026.07.22
+_commit: v2026.08.13
 _src_path: git+https://github.com/being-gaia-plan/ai-dev-handbook.git
 ci_provider: github-actions
 dependabot_ignore_major: 'true'
 github_org: tan3159
 min_python_version: '3.11'
 notification_email: tan3159@gmail.com
+personal_dir_name: user
 primary_language: Python
 project_name: TradeScripts
 python_package_name: trade_scripts
 technology_radar_url: ''
+use_ai_review: 'true'
 use_coderabbit: 'true'
+use_issue_next: 'true'
+use_issue_quality_check: 'true'
 use_scorecard: 'true'
 use_security_policy: 'true'

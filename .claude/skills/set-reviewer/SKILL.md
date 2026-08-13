@@ -1,3 +1,8 @@
+---
+name: set-reviewer
+description: PRレビューバックエンドを切り替えるスキル。選択内容は ~/.claude/ai-reviewer ファイルに保存され、次回以降の tidd_tools ai-review 実行に引き継がれる。ユーザーが「/set-reviewer」と言ったときに使う。
+---
+
 # set-reviewer
 
 PRレビューバックエンドを切り替えるスキル。

@@ -3,37 +3,14 @@ name: detect-duplicates
 description: open Issue を全スキャンして意味的重複疑いペアを検出し duplicate-suspect ラベル + コメントを付与する（Issue #1306）。日次 schedule または手動 slash command として発火する。
 ---
 
-# /detect-duplicates
-
-open Issue を全スキャンし、意味的に類似した（重複疑いのある）ペアを検出して
-`duplicate-suspect` ラベルと「重複疑い」コメントを付与する skill。
-
-**実行モード:**
-- **日次 schedule**: Issue #1282 (schedule PoC) の結果に従い、schedule 経由で自動発火
-- **手動発火**: `/detect-duplicates` を Claude Code セッション内で実行
-
-## 前提条件
-
-GitHub に `duplicate-suspect` ラベルが存在すること（初回のみ手動で作成する）:
-
-```bash
-gh label create "duplicate-suspect" \
-  --description "重複の疑いがある Issue（/detect-duplicates skill による自動検出）" \
-  --color "D4C5F9"
 ```
-
-## 手順
-
-### STEP 1: open Issue 一覧を取得
-
-```bash
-gh issue list --state open --limit 500 \
-  --json number,title,labels,body \
-  --jq '[.[] | {number, title, labels: [.labels[].name], body: (.body // "" | .[0:500])}]'
+mcp__github__list_issues({owner, repo, state: "open", per_page: 100})
+# 100件を超える場合は page パラメータで巡回する（最大 500 件）
+# 各 Issue から {number, title, labels: [label.name, ...], body: body[0:500]} を抽出する
 ```
 
 - `body` は先頭 500 文字に限定してトークンを節約する
-- `limit 500` で最大 500 件取得（通常は十分な上限）
+- ページ巡回で最大 500 件取得（通常は十分な上限）
 
 **Issue 数が 100+ の場合（Issue #1466 対応）:** `tidd detect-duplicates-batch` サブコマンドで priority + created_at 順に並び替え、30 Issue/batch で分割してから subagent に渡す。各 batch の実行時間は `~/.cache/detect-duplicates-perf/batch-<N>.json` に自動記録される。
 
@@ -44,14 +21,11 @@ tidd detect-duplicates-batch --batch-size 30 --dry-run
 
 `--dry-run` を付けると各 batch の issue 番号を stderr にログ出力するだけで実質処理をスキップする（perf 記録は常に行う）。skill 側の subagent 起動 loop は本 CLI の scope 外であり、SKILL.md 側で STEP 2 以降を batch ごとに繰り返す運用に切り替える（batch 分割ロジックの詳細は `tidd_tools.detect_duplicates_batch` モジュールを参照）。
 
-**gh コマンド失敗時のエラーハンドリング:** exit code が非ゼロ（ネットワーク障害・認証切れ・quota
-超過等）の場合は skill 全体を停止する:
+**MCP tool 失敗時のエラーハンドリング:** MCP call が失敗した場合は skill 全体を停止する:
 
-```bash
-if ! gh_output=$(gh issue list --state open --limit 500 --json number,title,labels,body); then
-  printf 'gh issue list failed (exit=%s)\n' "$?" >&2
-  exit 1
-fi
+```
+issues = mcp__github__list_issues({owner, repo, state: "open", per_page: 100})
+# エラー時は「Issue 一覧取得に失敗しました」と出力して exit 1
 ```
 
 結果を `issues` として保持する。Issue 数が 0 件（`[]`）なら以下を出力して exit 0:
@@ -72,7 +46,7 @@ subagent 起動は行わない。
 - 51 件以上: Issue 番号昇順でソートして均等に 3 分割し、3 subagent を並列起動
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="duplicate_detector", task_name="duplicate_detector", message=...) に読み替え
   subagent_type="duplicate-detector",
   description="重複疑いペア検出（anchor: Issue #X〜#Y 担当）",
   prompt=<以下の形式で全 issues + anchor 範囲を渡す>
@@ -135,7 +109,7 @@ fi
 ```
 
 **入力バリデーション（コマンドインジェクション対策）:** subagent が返した `pairs[].a` /
-`pairs[].b` は整数として **検証必須**。非数値 / 記号を含む値は STEP 4 で `gh issue edit` / `gh issue comment` の
+`pairs[].b` は整数として **検証必須**。非数値 / 記号を含む値は STEP 4 で `mcp__github__update_issue` / `mcp__github__add_issue_comment` の
 引数として渡す前に reject する:
 
 ```bash
@@ -161,45 +135,24 @@ reason 文字列は STEP 4 で `--body-file` 経由（シェル未経由）で�
 バリデーション未通過の値は STEP 3 で reject 済みのため本 STEP には到達しない。
 
 **ラベル付与（整数バリデーション済み値のみ）:**
-```bash
-gh issue edit "$a" --add-label "duplicate-suspect"
-gh issue edit "$b" --add-label "duplicate-suspect"
+```
+# 既存 labels を取得してから追記する（mcp__github__update_issue は labels を全置換するため）
+issue_a = mcp__github__get_issue({owner, repo, issue_number: <a>})
+mcp__github__update_issue({owner, repo, issue_number: <a>, labels: [<issue_a の既存 labels> + "duplicate-suspect"]})
+
+issue_b = mcp__github__get_issue({owner, repo, issue_number: <b>})
+mcp__github__update_issue({owner, repo, issue_number: <b>, labels: [<issue_b の既存 labels> + "duplicate-suspect"]})
 ```
 
-**コメント投稿（未信頼文字列をシェル引数に渡さないため Write tool + `--body-file` を使う）:**
+**コメント投稿（`reason` は Issue 本文由来の非信頼入力のため `mcp__github__add_issue_comment` の body パラメータとして渡す）:**
 
-`reason` は Issue 本文由来の非信頼入力のため、シェル構文やヒアドキュメントに直接埋め込まない。
-Write tool の `content` パラメータは JSON フィールドとして内部処理されシェルを経由しない。
-`<a>`・`<b>`・`<reason>` を実際の値で置換して Write tool を呼び出し、ファイル経由でコメントを投稿する。
-
-Issue <a> 用コメントファイルを Write tool で作成する（`<b>` と `<reason>` を実際の値で置換）:
+MCP tool の `body` パラメータは JSON フィールドとして内部処理されシェルを経由しない。
+`<a>`・`<b>`・`<reason>` を実際の値で置換して MCP tool を呼び出す。
 
 ```
-file_path: /tmp/dup-comment-a.txt
-content（シェル経由なし・JSON パラメータとして渡す）:
-  🔍 重複疑い: #<b>（理由: <reason>）
-  /detect-duplicates skill が検出。着手時に相互確認して片方をクローズするか、重複でなければ `duplicate-suspect` ラベルを除去してください。
-```
+mcp__github__add_issue_comment({owner, repo, issue_number: <a>, body: "重複疑い: #<b>（理由: <reason>）\n/detect-duplicates skill が検出。着手時に相互確認して片方をクローズするか、重複でなければ `duplicate-suspect` ラベルを除去してください。"})
 
-```bash
-gh issue comment <a> --body-file /tmp/dup-comment-a.txt
-```
-
-Issue <b> 用コメントファイルを Write tool で作成する（`<a>` と `<reason>` を実際の値で置換）:
-
-```
-file_path: /tmp/dup-comment-b.txt
-content（シェル経由なし・JSON パラメータとして渡す）:
-  🔍 重複疑い: #<a>（理由: <reason>）
-  /detect-duplicates skill が検出。着手時に相互確認して片方をクローズするか、重複でなければ `duplicate-suspect` ラベルを除去してください。
-```
-
-```bash
-gh issue comment <b> --body-file /tmp/dup-comment-b.txt
-```
-
-```bash
-rm -f /tmp/dup-comment-a.txt /tmp/dup-comment-b.txt
+mcp__github__add_issue_comment({owner, repo, issue_number: <b>, body: "重複疑い: #<a>（理由: <reason>）\n/detect-duplicates skill が検出。着手時に相互確認して片方をクローズするか、重複でなければ `duplicate-suspect` ラベルを除去してください。"})
 ```
 
 ### STEP 5: 結果を報告

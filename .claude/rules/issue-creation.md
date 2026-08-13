@@ -1,8 +1,6 @@
 # Issue作成ルール
 
-hookとAgy（`/issue-review`）の両方から参照される単一の真実源。
-合格例・source 分類詳細・priority 相対判定・Gherkin 品質基準詳細は
-[docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) を参照。
+hookとAgy（`/issue-review`）が参照する単一の真実源。詳細: docs/reference/issue-creation-guide.md
 
 ---
 
@@ -19,7 +17,7 @@ hookとAgy（`/issue-review`）の両方から参照される単一の真実源�
 ### Pain（背景の記述品質）
 
 `## 背景` に「〇〇ができないせいで△△が起きている」レベルで Pain が書かれているか。
-合格例・不合格例は [docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) 参照。
+合格例・不合格例は docs/reference/issue-creation-guide.md 参照。
 
 ### ラベル
 
@@ -27,19 +25,18 @@ hookとAgy（`/issue-review`）の両方から参照される単一の真実源�
 |------|---------|
 | `type:` ラベル | `type: feat` / `fix` / `docs` / `refactor` / `ci` / `build` / `research` のいずれか |
 | `priority:` ラベル | `priority: critical` / `high` / `medium` / `low` のいずれか |
-| `source:` ラベル | **🤖 + `type: fix` の場合のみ**: `source: ci` / `rework` / `human-report` / `new-bug` / `spec-change` のいずれか（人間起票は対象外）。5 分類定義・優先順位は [docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) 参照 |
+| `source:` ラベル | **🤖 + `type: fix` のみ**: `ci`/`rework`/`human-report`/`new-bug`/`spec-change` のいずれか（人間起票は対象外・分類詳細は guide 参照） |
 
-priority 相対判定（`/create-issue` skill が分布提示・`issue-writer` subagent が相対評価で選択）の基準は
-[docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) 参照。
+priority 相対判定の基準は docs/reference/issue-creation-guide.md 参照。
 
 ### 粒度・依存関係・ドキュメント更新・方針整合性
 
 | 項目 | 判断基準 |
 |------|---------|
 | 粒度 | 1つのPRで完結するか（複数の関心事が混在していないか） |
-| 依存関係 | 依存Issueの状態を確認してコメントに記載（合否に影響しない） |
-| ドキュメント更新 | 実装に伴う `docs/`・`CLAUDE.md` 等の更新が `## やること` に含まれているか（意味チェック） |
-| 方針整合性 | `docs/decisions/`・`docs/conventions.md`・`CLAUDE.md` の方針と矛盾していないか |
+| 依存関係 | 依存Issueの状態をコメントに記載（合否に影響しない）。`blocked-by` は未解決依存を自動選定から除外（#3640） |
+| ドキュメント更新 | `docs/`・`CLAUDE.md` 等の更新が `## やること` に含まれているか |
+| 方針整合性 | `docs/decisions/`・`conventions.md`・`CLAUDE.md` と矛盾していないか |
 
 ---
 
@@ -60,9 +57,7 @@ priority 相対判定（`/create-issue` skill が分布提示・`issue-writer` s
 **`## やること` の変更対象が `.claude/hooks/` のみの Issue は `## 振る舞い` 不要。**
 代わりに `test_<hookname>_hook.py` 契約テストを書く。
 
-**除外条件（両方を満たすこと）:**
-1. `## やること` 内のファイルパス参照が `.claude/hooks/` のみ（他パスが混在しない）
-2. `## やること` にファイルパスの記述が存在する
+**除外条件（両方満たす）:** 1) パス参照が `.claude/hooks/` のみ 2) パス記述が存在する
 
 ### Gherkin品質基準（検証可能性ゲート）
 
@@ -71,10 +66,19 @@ priority 相対判定（`/create-issue` skill が分布提示・`issue-writer` s
 | セクション存在 | `## 振る舞い` セクションが存在するか |
 | Scenario数 | Scenario が1つ以上あるか |
 | 正常系・異常系 | 正常系・異常系の**両方**が含まれているか（異常系なしは不合格） |
-| Then句 | 具体的な値・観測可能な状態（exit code・出力文字列・ファイル存在等）を示しているか |
+| Then句 | 具体的な値・観測可能な状態（exit code・出力文字列等）を示しているか |
 
 詳細（合格例・不合格例・critical モジュール境界値ルール・positive list）は
-[docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) 参照。
+docs/reference/issue-creation-guide.md 参照。
+
+---
+
+## 期待する出力例（任意セクション）
+
+`## 期待する出力例` は任意（未記載でもペナルティなし）。
+出力テキスト（Markdown 表・JSON・ログ行等）を貼ると、実装 AI がそれをスナップショット/テスト期待値として固定するため diff で確認しやすくなる。
+合格例・hook の動作詳細は
+docs/reference/issue-creation-guide.md 参照。
 
 ---
 
@@ -83,28 +87,19 @@ priority 相対判定（`/create-issue` skill が分布提示・`issue-writer` s
 **合格条件:** 全チェックをパス。feat系は設計の選択肢チェックも必須。
 
 **コメント形式:** `## Issue品質チェック結果` + ✅/❌ + 不合格項目リスト。
-テンプレートは [docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) 参照。
+テンプレートは docs/reference/issue-creation-guide.md 参照。
 
 ---
 
 ## hookの動作（Claude作成時）
 
-`PreToolUse` hookが `gh issue create` コマンドを捕捉し、以下を機械的にチェックする:
-
-1. `## 背景`・`## やること` セクション存在
-2. タイトルが `🤖 <type>: <説明>` 形式か（🤖プレフィックス必須）
-3. `## やること` 各行が `- [ ]` または `- [x]` 形式か
-4. feat系: `## 設計の選択肢` セクション存在
-5. feat/fix系: `## 振る舞い` セクション存在（hook契約系 Issue は除外）
-
-不備があればコマンドをブロックし、Claudeが修正して再実行する。
-実装詳細は [docs/reference/hooks.md#validate-issuepy](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/hooks.md#validate-issuepy) 参照。
+`PreToolUse` hookが `gh issue create` を捕捉し、上記チェック項目を機械的に検証する。
+不備があればブロックし、Claudeが修正して再実行する。詳細: docs/reference/hooks.md#validate-issuepy
 
 ---
 
 ## 関連ドキュメント
 
-- [docs/reference/issue-creation-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/issue-creation-guide.md) — 詳細ガイド（合格例・source分類・Gherkin品質）
-- [`docs/conventions.md`](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/conventions.md) — Issue・PR・コミット規約
-- [docs/reference/hooks.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/hooks.md) — Hooks リファレンス
+- docs/reference/issue-creation-guide.md — 詳細ガイド
+- `docs/conventions.md` — Issue・PR・コミット規約
 - [`workflow.md`](./workflow.md) — ワークフロー規約

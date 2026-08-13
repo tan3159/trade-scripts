@@ -27,15 +27,17 @@ stdlib のみ使用。
 
 from __future__ import annotations
 
-import json
 import re
-import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import (  # noqa: E402
+from _lib.gh_command import CLOSES_RE as _CLOSES_RE
+from _lib.gh_command import extract_closes_issues as _extract_closes_issues
+from _lib.gh_command import extract_pr_body as _extract_body
+from _lib.gh_command import is_gh_pr_create as _is_gh_pr_create
+from _lib.hook_io import (
     get_command,
     get_tool_name,
     is_hook_enabled,
@@ -44,53 +46,17 @@ from _lib.hook_io import (  # noqa: E402
 
 DETAIL = "詳細: docs/reference/hooks.md#auto-tick-issue-itemspy\n"
 
-_GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
-_CLOSES_RE = re.compile(r"\b(?:closes|fixes|resolves)\s+#(\d+)", re.IGNORECASE)
-_YARU_HEADER_RE = re.compile(r"^##\s*やること\s*$", re.MULTILINE)
-_NEXT_H2_RE = re.compile(r"^##\s+", re.MULTILINE)
-_UNCHECKED_ITEM_RE = re.compile(r"^\s*-\s*\[\s\]\s+(.+?)\s*$")
-_EXCLUDE_PREFIX_RE = re.compile(r"^\s*\[(手動|AI確認(-post-merge)?)\]")
 _BACKTICK_PATH_RE = re.compile(r"`([^`]+)`")
 _MCP_CREATE_PR_TOOL = "mcp__github__create_pull_request"
 
 
-def _extract_body(command: str) -> str:
-    """gh pr create コマンドから --body / --body-file の値を抽出する."""
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return ""
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok in ("--body", "-b") and i + 1 < len(tokens):
-            return tokens[i + 1]
-        if tok.startswith("--body="):
-            return tok[len("--body=") :]
-        if tok in ("--body-file", "-F") and i + 1 < len(tokens):
-            try:
-                return Path(tokens[i + 1]).read_text(encoding="utf-8")
-            except OSError:
-                return ""
-        if tok.startswith("--body-file="):
-            try:
-                return Path(tok[len("--body-file=") :]).read_text(encoding="utf-8")
-            except OSError:
-                return ""
-        i += 1
-    return ""
-
-
 def extract_closes_issues(pr_body: str) -> list[int]:
-    """PR body から `closes|fixes|resolves #N` を重複排除して抽出する."""
-    if not pr_body:
-        return []
-    seen: list[int] = []
-    for m in _CLOSES_RE.finditer(pr_body):
-        n = int(m.group(1))
-        if n not in seen:
-            seen.append(n)
-    return seen
+    """PR body から `closes|fixes|resolves #N` を重複排除して抽出する.
+
+    Issue #2952: `_lib/gh_command.extract_closes_issues` へ実装集約（refs を含まない
+    `CLOSES_RE` を使用。auto-tick 用途は PR body 全消化 gate であり refs は対象外）。
+    """
+    return _extract_closes_issues(pr_body, pattern=_CLOSES_RE)
 
 
 def parse_todo_items(issue_body: str) -> list[str]:
@@ -98,38 +64,41 @@ def parse_todo_items(issue_body: str) -> list[str]:
 
     `[手動]`/`[AI確認]`/`[AI確認-post-merge]` prefix の項目は auto-tick 対象外
     （後続 STEP・人間確認で消化される想定のため）除外する。
+
+    Issue #2953: `_lib.yaru_sections`（`_lib.gh_cache` を経由し import 時に
+    `git remote get-url origin` を実行する）は、early-return 経路
+    （`gh pr create` 以外・disabled 時等）で subprocess を一切呼ばない既存契約を
+    崩さないよう、ここで遅延 import する。
     """
+    from _lib.yaru_sections import (
+        extract_section,
+        has_manual_or_ai_confirm_prefix,
+        parse_unchecked_items,
+    )
+
     if not issue_body:
         return []
-    header_match = _YARU_HEADER_RE.search(issue_body)
-    if not header_match:
+    section = extract_section(issue_body)
+    if section is None:
         return []
-    start = header_match.end()
-    next_h2 = _NEXT_H2_RE.search(issue_body, pos=start)
-    end = next_h2.start() if next_h2 else len(issue_body)
-    section = issue_body[start:end]
-
-    items: list[str] = []
-    for line in section.splitlines():
-        m = _UNCHECKED_ITEM_RE.match(line)
-        if not m:
-            continue
-        text = m.group(1)
-        if _EXCLUDE_PREFIX_RE.match(text):
-            continue
-        items.append(text)
-    return items
+    return [
+        text
+        for text in parse_unchecked_items(section)
+        if not has_manual_or_ai_confirm_prefix(text)
+    ]
 
 
 def apply_tick(issue_body: str, item_text: str) -> str:
     """`- [ ] <item_text>` 行を `- [x] <item_text>` に置換する（完全一致のみ）."""
+    from _lib.yaru_sections import match_checkbox_line
+
     if not item_text:
         return issue_body
     out_lines: list[str] = []
     for line in issue_body.splitlines(keepends=True):
         stripped = line.rstrip("\n").rstrip("\r")
-        m = _UNCHECKED_ITEM_RE.match(stripped)
-        if m and m.group(1) == item_text:
+        matched = match_checkbox_line(stripped)
+        if matched and matched[0] == " " and matched[1] == item_text:
             newline = line[len(stripped) :]
             indent_end = stripped.index("-")
             indent = stripped[:indent_end]
@@ -152,7 +121,7 @@ def find_tick_evidence_path(item_text: str, changed_files: list[str]) -> str | N
 def _get_changed_files() -> list[str] | None:
     """`git diff --name-only origin/main...HEAD` で PR 変更ファイル一覧を返す（失敗時 None）."""
     try:
-        result = subprocess.run(  # noqa: S603, S607
+        result = subprocess.run(
             ["git", "diff", "--no-color", "--name-only", "origin/main...HEAD"],
             capture_output=True,
             text=True,
@@ -166,27 +135,6 @@ def _get_changed_files() -> list[str] | None:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def _gh_issue_body(issue_number: int) -> str | None:
-    try:
-        result = subprocess.run(  # noqa: S603, S607
-            ["gh", "issue", "view", str(issue_number), "--json", "body"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=15,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    body = data.get("body")
-    return str(body) if isinstance(body, str) else None
-
-
 def _gh_issue_edit_body(issue_number: int, new_body: str) -> bool:
     try:
         import tempfile
@@ -196,7 +144,7 @@ def _gh_issue_edit_body(issue_number: int, new_body: str) -> bool:
         ) as f:
             f.write(new_body)
             tmp_path = f.name
-        result = subprocess.run(  # noqa: S603, S607
+        result = subprocess.run(
             ["gh", "issue", "edit", str(issue_number), "--body-file", tmp_path],
             capture_output=True,
             text=True,
@@ -210,7 +158,7 @@ def _gh_issue_edit_body(issue_number: int, new_body: str) -> bool:
 
 def _gh_issue_comment(issue_number: int, comment: str) -> bool:
     try:
-        result = subprocess.run(  # noqa: S603, S607
+        result = subprocess.run(
             ["gh", "issue", "comment", str(issue_number), "--body", comment],
             capture_output=True,
             text=True,
@@ -234,7 +182,9 @@ def _format_evidence_comment(item_text: str, evidence_path: str, pr_hint: str) -
 
 def _process_issue(issue_number: int, *, pr_hint: str) -> list[str]:
     """1 Issue 分の auto-tick 処理を行い、tick できなかった未チェック項目一覧を返す."""
-    issue_body = _gh_issue_body(issue_number)
+    from _lib.yaru_sections import fetch_issue_body
+
+    issue_body = fetch_issue_body(issue_number)
     if issue_body is None:
         sys.stderr.write(
             f"WARN: auto-tick-issue-items: Issue #{issue_number} の取得に失敗したため skip します\n"
@@ -293,7 +243,7 @@ def _main() -> int:
         pr_hint = "PR 作成時（mcp__github__create_pull_request）"
     elif tool_name == "Bash":
         command = get_command(payload)
-        if not _GH_PR_CREATE_RE.search(command):
+        if not _is_gh_pr_create(command):
             return 0
         body = _extract_body(command)
         pr_hint = "PR 作成時（gh pr create）"

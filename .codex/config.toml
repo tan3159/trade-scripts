@@ -1,0 +1,37 @@
+# .codex/config.toml — Codex CLI プロジェクト設定（copier テンプレート・#3210）
+#
+# 安全側運用方針: .claude/settings.json の permissions（破壊的操作は要確認）。
+# シークレットファイル deny: .claude/settings.managed.json.jinja の deny と対称に、
+# permission profile で .env / .envrc / .mise.toml 等の Read/Write を拒否する。
+# 機密情報は絶対に書かない: Authorization ヘッダーは環境変数 GITHUB_MCP_PAT 参照のみ。
+
+approval_policy = "on-request"
+default_permissions = "safe-workspace"
+
+[permissions.safe-workspace]
+description = "ワークスペース書き込み + シークレット系ファイルへのアクセス拒否（.claude/settings.json の deny と対称）"
+extends = ":workspace"
+
+[permissions.safe-workspace.filesystem]
+glob_scan_max_depth = 8
+"~/.ssh" = "deny"
+"~/.gnupg" = "deny"
+"~/.codex/.env" = "deny"
+"~/.codex/auth.json" = "deny"
+"~/.envrc" = "deny"
+"~/.mise.toml" = "deny"
+
+[permissions.safe-workspace.filesystem.":workspace_roots"]
+".env" = "deny"
+".env.*" = "deny"
+".envrc" = "deny"
+".mise.toml" = "deny"
+"**/*.env" = "deny"
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/.envrc" = "deny"
+"**/.mise.toml" = "deny"
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+bearer_token_env_var = "GITHUB_MCP_PAT"

@@ -1,0 +1,32 @@
+# npm-cooldown ゲート許可リスト（Issue #3498）
+#
+# `projects/py/tidd_tools/src/tidd_tools/pre_flight.py` の `_check_npm_cooldown`
+# （npm-cooldown ゲート・Issue #3439）が blocked 判定する前にこのリストを読み込み、
+# `name@version` が一致すればそのパッケージの cooldown チェックをスキップする。
+#
+# `.claude/rules/dependency-allowlist.yaml`（pyproject.toml 依存追加用）と同じ
+# 運用パターンを踏襲する。パッケージ単位で「既知・CI実績あり」を例外扱いするための
+# 許可リストであり、対象は npm パッケージの `name@version` 形式。
+#
+# 追加方法: 許可リストへの追加は PR で理由を明記すること
+#   （各エントリにコメントで追加理由と追加日を残す）。
+
+packages:
+  # rulesync（AI ツール設定生成 CLI）本体。CI で 2026-08-07 から稼働実績あり
+  # （追加日: 2026-08-09・Issue #3411・#3498）
+  - rulesync@16.7.0
+
+  # rulesync@16.7.0 が要求する transitive dependency（fastmcp 経由の
+  # rulesync 公式必須依存のため optional 除外不可）。CI で 2026-08-07 から
+  # 稼働実績あり（追加日: 2026-08-09・Issue #3411・#3498）
+  - hono@4.13.1
+  - jose@6.2.8
+  - mcp-proxy@6.7.0
+  - express-rate-limit@8.6.2
+  - "@octokit/endpoint@11.0.4"
+
+  # rulesync@16.7.0 → fastmcp → @modelcontextprotocol/sdk が要求する
+  # 必須 transitive dependency（`@hono/node-server@^1.19.9 || ^2.0.5`・optional
+  # 除外不可）。#3498 の初回登録時に package-lock.json 実測から漏れていたため
+  # #3411 再開時に追加（追加日: 2026-08-09・Issue #3411・#3498）
+  - "@hono/node-server@2.1.0"

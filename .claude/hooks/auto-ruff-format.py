@@ -22,7 +22,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import (  # noqa: E402
+from _lib.git_helpers import git_toplevel as _git_toplevel
+from _lib.hook_io import (
     get_file_path,
     get_tool_name,
     is_hook_enabled,
@@ -31,22 +32,6 @@ from _lib.hook_io import (  # noqa: E402
 
 # ruff format の対象ディレクトリ（この配下の .py のみ）
 _TARGET_SUBDIR = "projects/py/tidd_tools/"
-
-
-def _git_toplevel() -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip() or None
 
 
 def _main() -> int:

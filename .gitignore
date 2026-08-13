@@ -11,6 +11,7 @@ bin/
 .claude/scheduled_tasks.lock
 .claude/ng-words.local.txt
 .direnv/
+.tidd/state/
 
 # Python
 .venv/

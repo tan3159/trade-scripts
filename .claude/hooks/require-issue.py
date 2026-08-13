@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: git commit に closes #N が含まれるか確認する.
+"""PreToolUse hook: git commit に Issue 参照キーワードが含まれるか確認する.
 
 NO TICKET NO WORK — Issueなしのコミットをブロックする（exit 2）。
 cache 優先で Issue 存在を確認し、TTL 切れ時は stale を即返しつつ
@@ -10,6 +10,31 @@ stale hit 時は BG refresh 側（gh_cache_refresh.py）が quota 保護を担�
 
 Python 化（Phase 4 / #1057）。旧 require-issue.sh の振る舞いを 1:1 で踏襲する。
 stdlib のみ使用。
+
+#2638: 受理キーワードを closes のみから closes / fixes / resolves / refs に拡張する。
+refs は GitHub のクローズキーワードではないため、決定記録など未実装 Issue の参照に使用できる。
+
+Issue #2958: 対象リポジトリ CWD の解決を `_lib.hook_io.resolve_target_cwd()` へ移行する。
+従来の `_resolve_target_repo_path` はコマンド文字列内の `cd <path> &&` / `git -C <path>`
+しか見ておらず、payload の `cwd` フィールド（Bash 永続 CWD が worktree にあり、
+コマンド自体にはパス指定がないケース）を無視していた。
+
+PR #3026 codex レビュー指摘: `resolve_target_cwd()` は候補が 1 つもなければプロセス
+CWD へフォールバックし常に非 None を返すため、戻り値をそのまま ``_issue_exists()`` の
+``repo_path`` に渡すと、cd / -C / payload cwd のいずれも指定がない通常のコミットでも
+常に ``repo_path`` 指定ありの経路（direct verify・cache 未使用）に入ってしまい、
+fresh/stale cache と rate-limit bypass 経路（#1393 / #1969）が使われなくなる。
+解決先がプロセス CWD 自身と一致する場合（＝実質「指定なし」）は ``repo_path=None``
+を渡し、従来どおり cache 優先経路を使う。解決先がプロセス CWD と異なる場合のみ
+（cd / -C / payload cwd による明示的なクロスリポジトリ指定）direct verify を使う。
+
+Issue #3717: 本 hook は「セッションを開いたリポジトリ」の NO TICKET NO WORK 強制を
+目的とする。Claude Code セッションが repo A で開かれている状態で repo B（別 git
+リポジトリ）のファイルをコミットする場合、repo A のルールを repo B の操作へ適用しない。
+コミット対象リポジトリがセッション CWD のリポジトリと異なる場合は skip（exit 0）する。
+同一リポジトリの別 worktree は「同じリポジトリ」として扱う（common git dir 一致判定）。
+
+escape hatch: 環境変数 `SKIP_REQUIRE_ISSUE_GATE=1` でチェックを全スキップする。
 """
 
 from __future__ import annotations
@@ -22,47 +47,33 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.gh_cache import get_issue as _get_issue_fresh  # noqa: E402 - Issue #1463
-from _lib.gh_cache import get_issue_or_stale_with_bg_refresh as _get_issue_swr  # noqa: E402
-from _lib.gh_cache import upsert_issue as _upsert_issue  # noqa: E402
-from _lib.hook_io import get_command, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.gh_cache import get_issue as _get_issue_fresh
+from _lib.gh_cache import (
+    get_issue_or_stale_with_bg_refresh as _get_issue_swr,
+)
+from _lib.gh_cache import upsert_issue as _upsert_issue
+from _lib.gh_command import CLOSES_OR_REFS_RE as _CLOSES_RE
+from _lib.hook_io import (
+    get_command,
+    is_hook_enabled,
+    read_hook_input,
+    resolve_target_cwd,
+)
 
 # 旧 sh: grep -qE '(^|&&|;)\s*git commit(\s|$)'
 # Issue #2226: `git -C <path> commit` 形式（クロスリポジトリコミット）も検出対象に含める。
 _GIT_COMMIT_RE = re.compile(r"(^|&&|;)\s*git(?:\s+-C\s+\S+)?\s+commit(\s|$)")
 # 旧 sh: grep -qiE 'closes #[0-9]+'
-_CLOSES_RE = re.compile(r"closes #([0-9]+)", re.IGNORECASE)
-
-# Issue #2226: `cd <path> &&` / `git -C <path>` から対象リポジトリのパスを解決する。
-_CD_PREFIX_RE = re.compile(r"(?:^|&&|;)\s*cd\s+(.+?)\s*&&")
-_GIT_DASH_C_RE = re.compile(r"git\s+-C\s+(\"[^\"]+\"|'[^']+'|\S+)")
-
-
-def _strip_quotes(value: str) -> str:
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        return value[1:-1]
-    return value
-
-
-def _resolve_target_repo_path(command: str) -> str | None:
-    """コマンド文字列から対象リポジトリのパスを解決する（Issue #2226 / #2304）.
-
-    `cd <path> &&` prefix があればそのパスを、`git -C <path>` があればそのパスを返す。
-    どちらも見つからなければ None（セッション CWD をそのまま使う従来挙動）。
-    Issue #2304: 抽出したパスは `os.path.expanduser` でチルダ展開してから返す
-    （`~` を展開しないまま `subprocess.run(cwd=...)` に渡すと cwd 不正で誤ブロックする）。
-    """
-    match = _CD_PREFIX_RE.search(command)
-    if match:
-        return os.path.expanduser(_strip_quotes(match.group(1).strip()))
-    match = _GIT_DASH_C_RE.search(command)
-    if match:
-        return os.path.expanduser(_strip_quotes(match.group(1).strip()))
-    return None
-
+# #2638: closes / fixes / resolves / refs を受理する。
+# refs は GitHub のクローズキーワードではないため、決定記録など未実装 Issue の参照に使用できる。
+# #2653: word boundary を追加し、単語の一部として現れた文字列（例: unrefs / dereferences）を拒否する。
+# Issue #2952: パターン実体は `_lib/gh_command.CLOSES_OR_REFS_RE` へ集約（refs を含む変種）。
 
 # Issue #1463: adaptive stale TTL の閾値
 _RATE_LIMIT_NEAR_EXCEEDED = 5
+
+# escape hatch（Issue #3717）: 1 を設定すると本 hook のチェックを全スキップする.
+_ESCAPE_HATCH_ENV = "SKIP_REQUIRE_ISSUE_GATE"
 
 
 def _get_rate_limit_remaining() -> int | None:
@@ -141,20 +152,16 @@ def _issue_exists(issue_number: int, repo_path: str | None = None) -> bool:
        - remaining < 5 → allow without verification（一時 bypass・stderr 通知）
        - それ以外 → 同期 gh fetch（rate limit 枯渇 sentinel は bypass）
 
-    Issue #2304: ``repo_path`` が存在しないディレクトリの場合（誤ったパス抽出・
-    未展開のチルダ等）は誤ブロックせず、WARN を stderr に出力してセッション CWD の
-    通常フロー（``repo_path`` 未指定時と同じ優先順）にフォールバックする。
+    Issue #2958: ``repo_path`` は呼び出し元（``_main_impl``）が
+    ``_lib.hook_io.resolve_target_cwd()`` で解決するため、非 None 時は必ず実在する
+    ディレクトリである（実在しない候補は ``resolve_target_cwd()`` 内部で silent に
+    skip 済み）。よって本関数側での存在チェック・フォールバック WARN は不要（撤去）。
     """
     if repo_path is not None:
-        if os.path.isdir(repo_path):
-            data = _verify_issue_via_gh(issue_number, cwd=repo_path)
-            if data is _RATE_LIMIT_SENTINEL:
-                return True
-            return data is not None
-        sys.stderr.write(
-            f"WARN: 対象パス {repo_path} が見つからないため、"
-            "セッション CWD で Issue 確認を行います。\n"
-        )
+        data = _verify_issue_via_gh(issue_number, cwd=repo_path)
+        if data is _RATE_LIMIT_SENTINEL:
+            return True
+        return data is not None
 
     # 1. fresh cache hit（既存テスト互換のため独立チェックを維持）
     fresh = _get_issue_fresh(issue_number)
@@ -184,6 +191,101 @@ def _issue_exists(issue_number: int, repo_path: str | None = None) -> bool:
     return False
 
 
+def _session_repo_root() -> str | None:
+    """セッション CWD（process CWD）の git リポジトリルートを返す（Issue #3717）.
+
+    `git rev-parse --show-toplevel` は cwd 基準で解決されるため、対象リポジトリの
+    ルートは ``_target_repo_root`` で対象パスから引き直す。取得失敗時は None。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _target_repo_root(payload: dict, command: str) -> str | None:
+    """コミット対象リポジトリのルートを返す（Issue #3717）.
+
+    `resolve_target_cwd()` で解決したディレクトリから ``git rev-parse --show-toplevel``
+    でリポジトリルートを引き直す（cwd 基準の解決を対象パス基準へ引き直す）。
+    対象が git リポジトリでない・失敗時は None。
+    """
+    resolved_cwd = resolve_target_cwd(payload, command)
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            cwd=resolved_cwd,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _repo_identity(repo_root: str) -> str | None:
+    """リポジトリの同一性識別子（common git dir の絶対パス）を返す（Issue #3717）.
+
+    同一リポジトリの全 worktree で共通の gitdir を返すため、worktree / メイン
+    チェックアウトをまたいだ「同一リポジトリ」判定に使える。相対パス（メイン
+    チェックアウトでは `.git`）は ``repo_root`` 起点に解決する。失敗時は None。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    common = result.stdout.strip()
+    if not common:
+        return None
+    if not os.path.isabs(common):
+        common = os.path.join(repo_root, common)
+    return os.path.normpath(os.path.abspath(common))
+
+
+def _is_outside_session_repo(payload: dict, command: str) -> bool:
+    """コミット対象リポジトリがセッション CWD のリポジトリと異なるかを返す（Issue #3717）.
+
+    セッション CWD（process CWD）のリポジトリとコミット対象リポジトリが「同じ
+    リポジトリ」でない場合 True を返す（本 hook の対象外として skip する）。
+    同一リポジトリの別 worktree は同じ扱い。
+
+    セッション CWD が git リポジトリ外・対象リポジトリが判定不能の場合は False
+    （従来挙動を維持し、自リポジトリの NO TICKET NO WORK を弱めない）。
+    """
+    session_root = _session_repo_root()
+    if session_root is None:
+        return False
+    target_root = _target_repo_root(payload, command)
+    if target_root is None:
+        return False
+    session_identity = _repo_identity(session_root)
+    target_identity = _repo_identity(target_root)
+    if session_identity is None or target_identity is None:
+        return False
+    return session_identity != target_identity
+
+
 def _main_impl() -> tuple[int, dict[str, object]]:
     # Issue #1292: PreToolUse schema で payload を検証（不一致時は exit 2）
     payload = read_hook_input(hook_name="PreToolUse")
@@ -193,22 +295,37 @@ def _main_impl() -> tuple[int, dict[str, object]]:
     if not _GIT_COMMIT_RE.search(command):
         return 0, {"skip_reason": "not_git_commit"}
 
+    # Issue #3717: コミット対象リポジトリがセッション CWD のリポジトリと異なる場合は
+    # 本 hook（自リポジトリの NO TICKET NO WORK）の対象外として skip する。
+    # `closes #N` 存在チェックより前に判定する（別リポジトリへの closes 無しコミットが
+    # no_closes_ref で誤ってブロックされるのを防ぐ）。
+    if _is_outside_session_repo(payload, command):
+        return 0, {"skip_reason": "outside_session_repo"}
+
     match = _CLOSES_RE.search(command)
     if not match:
         sys.stderr.write(
-            "コミットメッセージに「closes #N」が含まれていません。NO TICKET NO WORK。\n"
+            "コミットメッセージに Issue 参照キーワードが含まれていません。NO TICKET NO WORK。\n"
             "Issue なしのコミットはブロックされます。対象の Issue 番号を指定してください。\n"
+            "  作業完了時（Issue をクローズする）: closes #N / fixes #N / resolves #N\n"
+            "  参照のみ（Issue をクローズしない）: refs #N\n"
             '例: git commit -m "feat: XXX を追加する closes #1234"\n'
+            '例: git commit -m "docs(decisions): 決定を記録する refs #1234"\n'
         )
         sys.stderr.write("詳細: docs/reference/hooks.md#require-issuepy\n")
         return 2, {"blocked_by": "no_closes_ref"}
 
     issue_number = int(match.group(1))
-    repo_path = _resolve_target_repo_path(command)
+
+    resolved_cwd = resolve_target_cwd(payload, command)
+    # PR #3026 codex レビュー指摘: resolve_target_cwd() の結果がプロセス CWD 自身と
+    # 一致する場合はクロスリポジトリ指定なし（実質フォールバックのみ）とみなし、
+    # None を渡して cache 優先経路（fresh/stale/rate-limit bypass）を維持する。
+    repo_path = resolved_cwd if resolved_cwd != os.getcwd() else None
     if not _issue_exists(issue_number, repo_path=repo_path):
         sys.stderr.write(
             f"Blocked: Issue #{issue_number} が見つかりません。"
-            "有効な Issue 番号で closes #N を指定してください。\n"
+            "有効な Issue 番号を指定してください（closes / fixes / resolves / refs #N）。\n"
         )
         sys.stderr.write("詳細: docs/reference/hooks.md#require-issuepy\n")
         return 2, {"blocked_by": "issue_not_found", "issue_number": issue_number}
@@ -219,6 +336,12 @@ def _main_impl() -> tuple[int, dict[str, object]]:
 def main() -> int:
     # Issue #1633: hook 機能別 on/off
     if not is_hook_enabled("require-issue"):
+        return 0
+    # Issue #3717: escape hatch（環境変数）
+    if os.environ.get(_ESCAPE_HATCH_ENV) == "1":
+        sys.stderr.write(
+            f"require-issue: {_ESCAPE_HATCH_ENV}=1 によりバイパスされました。\n"
+        )
         return 0
     exit_code, _extra = _main_impl()
     return exit_code

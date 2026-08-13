@@ -17,6 +17,24 @@
     （nightly label-pr SLO 付与率 0.00 の根本原因）
   - `gh pr view <N> --json headRefName,additions` から取得する
 
+**Issue #2865 で 2 つの取りこぼしを修正:**
+  - PR 作成が `mcp__github__create_pull_request`（GitHub MCP tool）経由に移行したセッションでは、
+    本 hook が `PostToolUse[Bash]` にしか登録されていなかったため一切発火しなかった
+    （`gh pr create` の Bash 実行が前提の設計だった）。`PostToolUse[mcp__github__create_pull_request]`
+    にも登録し、tool_response の schema に依存せず `tool_input.head`（PR 作成時に指定した branch）
+    を SoT として `gh pr list --head <branch>` で PR 番号を解決する。
+  - `-R`/`--repo` がセッションと**同一リポジトリ**を指しているだけの冗長な指定でも
+    無条件でクロスリポジトリ扱いされ skip されていた。`git remote get-url origin` から
+    実際のセッションリポジトリを解決し、一致する場合は通常どおりラベル付与を継続する。
+
+**Issue #3695 でラベル付与を REST API 化:**
+  - `gh pr edit --add-label` / `--remove-label` は内部で requestedReviewers（Team の
+    `name`/`slug`・User の `login`）を GraphQL 取得するため、トークンに `read:org` スコープが
+    無いと `INSUFFICIENT_SCOPES` で全体が失敗し、ラベルが付与されない（#3694 で発生）。
+  - ラベル付与は本質的に REST 完結の操作のため、`gh api` の
+    `POST/DELETE /repos/{owner}/{repo}/issues/{n}/labels` に置き換えた（repo スコープのみで動作）。
+    owner/repo は cwd の git remote ではなく PR 自身の `gh pr view --json headRepository` から解決する。
+
 hook 失敗原則（`docs/reference/hooks.md` §失敗原則 参照）:
   - **stderr にログ + exit 2 を必ず返す**
   - **silent success（常時 exit 0）は禁止**
@@ -35,20 +53,26 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import (  # noqa: E402
+from _lib.gh_command import is_gh_pr_create as _is_gh_pr_create
+from _lib.hook_io import (
     get_command,
     get_tool_name,
     get_tool_output,
     is_hook_enabled,
     read_hook_input,
+    resolve_target_cwd,
 )
 
-_GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
 _PR_URL_RE = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/(\d+)")
 # Issue #2226: `-R`/`--repo` フラグ検出（セッションリポジトリ以外への PR 作成）
 _REPO_FLAG_RE = re.compile(r"(?:^|\s)(?:-R|--repo)(?:=|\s+)(\S+)")
+# Issue #2865: gh remote URL（ssh/https どちらの形式でも owner/repo を抽出）
+_REMOTE_OWNER_REPO_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
+# Issue #2865: PR 作成が mcp__github__create_pull_request（GitHub MCP tool）経由のときの tool_name
+_MCP_CREATE_PR_TOOL = "mcp__github__create_pull_request"
 
 # ブランチ名プレフィックス → type ラベル
 _BRANCH_TO_LABEL: dict[str, str] = {
@@ -110,48 +134,15 @@ def _fetch_pr_meta(pr_number: str) -> dict[str, Any] | None:
     return meta if isinstance(meta, dict) else None
 
 
-def _fetch_pr_number_by_branch(payload: dict[str, Any] | None = None) -> str | None:
-    """現在の worktree ブランチに紐づく PR 番号を gh pr list --head で fallback 解決する (Issue #2048).
+def _pr_number_for_branch(branch: str) -> str | None:
+    """branch に紐づく open PR 番号を ``gh pr list --head`` で解決する (Issue #2048 / #2865).
 
-    ``gh pr create`` が Warning のみ出力して URL を返さなかった場合に呼ばれる。
-
-    hook はプロジェクトルート（main checkout・branch=main）で動く場合があるため、
-    ``gh pr view`` 引数なし（カレントブランチ依存）は確実性が低い。代わりに:
-
-    1. ``payload.get("cwd")`` → なければ ``os.getcwd()`` で hook 実行時の cwd を取得
-    2. その cwd で ``git rev-parse --abbrev-ref HEAD`` を呼んでブランチ名を取得
-    3. ブランチ名から ``gh pr list --head <branch> --state open --json number,headRefName
-       --limit 1`` を実行して JSON 配列から number を抽出
+    Args:
+        branch: 検索対象の headRefName。
 
     Returns:
-        PR number を文字列で返す。取得失敗時は None を返す。
+        PR number を文字列で返す。取得失敗・該当 PR なしの場合は None。
     """
-    # cwd を決定: payload.cwd → os.getcwd() の順で fallback
-    cwd: str | None = None
-    if payload is not None:
-        cwd = payload.get("cwd") or None
-    if not cwd:
-        cwd = os.getcwd()
-
-    # cwd で git rev-parse してブランチ名を取得
-    try:
-        git_result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-            cwd=cwd,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    if git_result.returncode != 0:
-        return None
-    branch = git_result.stdout.strip()
-    if not branch or branch == "HEAD":
-        return None
-
-    # ブランチ名で PR を明示的に検索（hook 実行環境依存を排除）
     try:
         pr_result = subprocess.run(
             [
@@ -186,6 +177,118 @@ def _fetch_pr_number_by_branch(payload: dict[str, Any] | None = None) -> str | N
     if number is None:
         return None
     return str(number)
+
+
+def _fetch_pr_number_by_branch(payload: dict[str, Any] | None = None) -> str | None:
+    """現在の worktree ブランチに紐づく PR 番号を gh pr list --head で fallback 解決する (Issue #2048).
+
+    ``gh pr create`` が Warning のみ出力して URL を返さなかった場合に呼ばれる。
+
+    hook はプロジェクトルート（main checkout・branch=main）で動く場合があるため、
+    ``gh pr view`` 引数なし（カレントブランチ依存）は確実性が低い。代わりに:
+
+    1. ``payload.get("cwd")`` → なければ ``os.getcwd()`` で hook 実行時の cwd を取得
+    2. その cwd で ``git rev-parse --abbrev-ref HEAD`` を呼んでブランチ名を取得
+    3. ``_pr_number_for_branch`` でブランチ名から PR 番号を解決する
+
+    Returns:
+        PR number を文字列で返す。取得失敗時は None を返す。
+    """
+    # cwd を決定: payload.cwd → os.getcwd() の順で fallback
+    cwd: str | None = None
+    if payload is not None:
+        cwd = payload.get("cwd") or None
+    if not cwd:
+        cwd = os.getcwd()
+
+    # cwd で git rev-parse してブランチ名を取得
+    try:
+        git_result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            cwd=cwd,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if git_result.returncode != 0:
+        return None
+    branch = git_result.stdout.strip()
+    if not branch or branch == "HEAD":
+        return None
+
+    return _pr_number_for_branch(branch)
+
+
+def _session_repo(cwd: str | None = None) -> str | None:
+    """``git remote get-url origin`` からセッションリポジトリ（``owner/repo``）を解決する (Issue #2865).
+
+    `-R`/`--repo`（Bash 経路）・``owner``/``repo``（mcp 経路）がこのリポジトリと同一かどうかの
+    判定に使う。ssh/https いずれの remote URL 形式にも対応する。
+
+    Args:
+        cwd: git コマンドを実行するディレクトリ。None ならプロセスの現在の cwd を使う。
+
+    Returns:
+        ``"owner/repo"`` 文字列。取得・解析に失敗した場合は None。
+    """
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            cwd=cwd,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    match = _REMOTE_OWNER_REPO_RE.search(url)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _owner_repo_for_pr(pr_number: str) -> str | None:
+    """PR のリポジトリ ``owner/repo`` を ``gh pr view --json headRepository`` で解決する (Issue #3695).
+
+    REST のラベル操作（``gh api .../repos/{owner}/{repo}/issues/{n}/labels``）には owner/repo が
+    必要。cwd の ``git remote get-url origin`` に依存せず PR 自身から取得する
+    （クロスリポジトリ PR は既に skip 済みのため base repo と一致する・#2865）。
+
+    Returns:
+        ``"owner/repo"`` 文字列。取得失敗時は None。
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", pr_number, "--json", "headRepository"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    head_repo = data.get("headRepository")
+    if not isinstance(head_repo, dict):
+        return None
+    name_with_owner = head_repo.get("nameWithOwner")
+    if isinstance(name_with_owner, str) and "/" in name_with_owner:
+        return name_with_owner
+    return None
 
 
 def _added_lines_override() -> int | None:
@@ -241,11 +344,24 @@ def _write_last_run(record: dict[str, Any]) -> None:
         sys.stderr.write(f"label-pr.py: WARN: last-run.json 書き込みに失敗: {exc}\n")
 
 
-def _add_label(pr_number: str, label: str) -> tuple[bool, str]:
-    """gh pr edit --add-label を実行し (成功, 詳細) を返す."""
+def _add_label(owner_repo: str, pr_number: str, label: str) -> tuple[bool, str]:
+    """REST API でラベルを追加し (成功, 詳細) を返す (Issue #3695).
+
+    ``gh pr edit --add-label`` は内部で requestedReviewers（Team の name/slug・User の
+    login）を GraphQL 取得するため read:org スコープが必要になる。REST の
+    ``POST /repos/{owner}/{repo}/issues/{n}/labels`` は repo スコープのみで動く。
+    """
     try:
         result = subprocess.run(
-            ["gh", "pr", "edit", pr_number, "--add-label", label],
+            [
+                "gh",
+                "api",
+                "--method",
+                "POST",
+                f"repos/{owner_repo}/issues/{pr_number}/labels",
+                "-f",
+                f"labels[]={label}",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -262,11 +378,23 @@ def _add_label(pr_number: str, label: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _remove_label(pr_number: str, label: str) -> tuple[bool, str]:
-    """gh pr edit --remove-label を実行し (成功, 詳細) を返す (Issue #2049)."""
+def _remove_label(owner_repo: str, pr_number: str, label: str) -> tuple[bool, str]:
+    """REST API でラベルを除去し (成功, 詳細) を返す (Issue #2049 / #3695).
+
+    ``gh api --method DELETE .../labels/{urlencode(name)}``。ラベル名の ``:`` ``/`` は
+    URL エンコードする。既にラベルが存在しない（HTTP 404）場合は冪等成功として扱う
+    （``gh pr edit --remove-label`` と同じセマンティクスを維持・#3695）。
+    """
+    encoded_name = quote(label, safe="")
     try:
         result = subprocess.run(
-            ["gh", "pr", "edit", pr_number, "--remove-label", label],
+            [
+                "gh",
+                "api",
+                "--method",
+                "DELETE",
+                f"repos/{owner_repo}/issues/{pr_number}/labels/{encoded_name}",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -277,6 +405,9 @@ def _remove_label(pr_number: str, label: str) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "30 秒でタイムアウト"
     if result.returncode != 0:
+        if "HTTP 404" in (result.stderr or ""):
+            # 既にラベルが存在しない → 冪等成功（gh pr edit --remove-label 相当）
+            return True, ""
         stderr_head = (result.stderr or "").strip().splitlines()[:3]
         detail = " | ".join(stderr_head) if stderr_head else f"exit={result.returncode}"
         return False, detail
@@ -317,78 +448,40 @@ def _fetch_existing_size_labels(pr_number: str) -> list[str] | None:
     ]
 
 
-def _main() -> int:
-    payload = read_hook_input(hook_name="PostToolUse")  # Issue #1364
-    if get_tool_name(payload) != "Bash":
-        return 0
+def _normalize_repo_ref(value: str) -> str | None:
+    """`-R`/`--repo` フラグ値・mcp owner/repo を ``owner/repo`` 形式に正規化する (Issue #2865).
 
-    command = get_command(payload)
-    if not _GH_PR_CREATE_RE.search(command):
-        return 0
+    ``gh pr create -R`` は ``[HOST/]OWNER/REPO`` またはリポジトリ URL を受け付ける。
+    ``_session_repo()`` の戻り値（``owner/repo``）と比較できる形式に揃える。
 
-    # Issue #2226: `-R`/`--repo` 指定時はセッションリポジトリ以外への PR 作成のため、
-    # `gh pr view`/`gh pr edit` がセッション CWD のリポジトリで実行され誤動作する。
-    # ラベル体系が異なる可能性もあるためスキップする（実装時判断）。
-    repo_flag_match = _REPO_FLAG_RE.search(command)
-    if repo_flag_match:
-        repo_flag = repo_flag_match.group(1)
-        sys.stderr.write(
-            f"label-pr.py: skip: gh pr create に -R/--repo {repo_flag!r} が指定されています"
-            "（セッションリポジトリ以外への PR のため、ラベル付与をスキップします）\n"
-        )
-        _write_last_run(
-            {
-                "status": "skipped",
-                "reason": "cross-repo PR (-R/--repo specified)",
-                "repo_flag": repo_flag,
-                "command": command[:200],
-            }
-        )
-        return 0
+    Args:
+        value: `-R`/`--repo` フラグの値。
 
-    # ここから先は「gh pr create の PostToolUse」経路。すべての exit 点で
-    # 発火履歴を残して silent skip を無くす（Issue #1445）。
-    output = get_tool_output(payload)
+    Returns:
+        ``"owner/repo"`` 文字列。解析できない場合は None。
+    """
+    value = value.strip()
+    if not value:
+        return None
+    match = _REMOTE_OWNER_REPO_RE.search(value)
+    if match:
+        return match.group(1)
+    parts = [p for p in value.split("/") if p]
+    if len(parts) >= 2:
+        return "/".join(parts[-2:])
+    return None
 
-    if not output.strip():
-        # output が空の場合は skip: `gh pr create` が失敗した / stdout を捕捉していない
-        sys.stderr.write("label-pr.py: skip: tool_response.output が空です\n")
-        _write_last_run(
-            {
-                "status": "skipped",
-                "reason": "empty tool output",
-                "command": command[:200],
-            }
-        )
-        return 0
 
-    match = _PR_URL_RE.search(output)
-    if not match:
-        # 非空だが PR URL が抽出できない → gh pr list --head <branch> で fallback 解決を試みる（#2048）
-        sys.stderr.write(
-            f"label-pr.py: PR URL not found in output: {output[:200]!r} — trying fallback via gh pr list --head\n"
-        )
-        fallback_number = _fetch_pr_number_by_branch(payload)
-        if fallback_number is None:
-            # fallback も失敗 → exit 2 で可視化（#1445 Scenario 3）
-            sys.stderr.write(
-                "label-pr.py: FAILED to extract PR number from output: fallback via gh pr list --head <branch> also failed\n"
-            )
-            _write_last_run(
-                {
-                    "status": "failed",
-                    "reason": "PR URL extraction failed",
-                    "output_head": output[:200],
-                }
-            )
-            return 2
-        sys.stderr.write(
-            f"label-pr.py: fallback resolved PR number via gh pr list --head: #{fallback_number}\n"
-        )
-        pr_number = fallback_number
-    else:
-        pr_number = match.group(1)
+def _apply_labels_for_pr(pr_number: str) -> int:
+    """PR 番号に対して type: / size: ラベルを解決・付与する (Issue #2865).
 
+    branch 解決（headRefName の取得）以降の処理を担う共通経路。
+    `gh pr create`（Bash）・`mcp__github__create_pull_request` のどちらの経路でも
+    PR 番号さえ解決できればこの関数に委譲する。
+
+    Returns:
+        exit code（0: 成功・スキップ / 2: 失敗）。
+    """
     # Issue #1947: hook はプロジェクトルート（branch=main）で実行されるため、
     # ローカル checkout ではなく PR の headRefName / additions を SoT とする。
     meta: dict[str, Any] | None = None
@@ -441,7 +534,24 @@ def _main() -> int:
         )
         return exit_code
 
-    ok, detail = _add_label(pr_number, type_label)
+    # Issue #3695: REST のラベル操作には owner/repo が必要。cwd の git remote ではなく
+    # PR 自身の headRepository から解決する
+    owner_repo = _owner_repo_for_pr(pr_number)
+    if owner_repo is None:
+        sys.stderr.write(
+            f"label-pr.py: FAILED: PR #{pr_number} の owner/repo を取得できませんでした"
+            "（gh pr view --json headRepository）\n"
+        )
+        _write_last_run(
+            {
+                "status": "failed",
+                "reason": "owner/repo resolution failed",
+                "pr_number": pr_number,
+            }
+        )
+        return 2
+
+    ok, detail = _add_label(owner_repo, pr_number, type_label)
     if ok:
         sys.stderr.write(
             f"label-pr.py: PR #{pr_number} に '{type_label}' ラベルを付与しました\n"
@@ -487,7 +597,7 @@ def _main() -> int:
         # 古い size/* ラベルを除去（新しい size_label と一致しないもの）
         for old_label in existing_size_labels:
             if old_label != size_label:
-                ok_rm, detail_rm = _remove_label(pr_number, old_label)
+                ok_rm, detail_rm = _remove_label(owner_repo, pr_number, old_label)
                 if ok_rm:
                     sys.stderr.write(
                         f"label-pr.py: PR #{pr_number} の旧 size ラベル '{old_label}' を除去しました\n"
@@ -509,7 +619,7 @@ def _main() -> int:
         )
         applied_labels.append(size_label)
     elif exit_code == 0 or existing_size_labels is None:
-        ok, detail = _add_label(pr_number, size_label)
+        ok, detail = _add_label(owner_repo, pr_number, size_label)
         if ok:
             sys.stderr.write(
                 f"label-pr.py: PR #{pr_number} に '{size_label}' ラベルを付与しました（追加 {added} 行）\n"
@@ -537,6 +647,152 @@ def _main() -> int:
         }
     )
     return exit_code
+
+
+def _handle_mcp_create_pr(payload: dict[str, Any]) -> int:
+    """``mcp__github__create_pull_request`` 経路のラベル付与 (Issue #2865).
+
+    tool_response の schema に依存せず、PR 作成時に指定した ``tool_input.head``
+    （branch）を SoT として ``gh pr list --head`` で PR 番号を解決する。
+    """
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+
+    branch = str(tool_input.get("head") or "")
+    if not branch:
+        sys.stderr.write("label-pr.py: skip: mcp tool_input.head が空です\n")
+        _write_last_run(
+            {
+                "status": "skipped",
+                "reason": "mcp tool_input.head missing",
+            }
+        )
+        return 0
+
+    owner = tool_input.get("owner")
+    repo = tool_input.get("repo")
+    if owner and repo:
+        mcp_repo = f"{owner}/{repo}"
+        session_repo = _session_repo(resolve_target_cwd(payload))
+        if session_repo is not None and mcp_repo != session_repo:
+            sys.stderr.write(
+                f"label-pr.py: skip: mcp owner/repo {mcp_repo!r} がセッションリポジトリ "
+                f"{session_repo!r} と異なります（クロスリポジトリ PR のため、ラベル付与をスキップします）\n"
+            )
+            _write_last_run(
+                {
+                    "status": "skipped",
+                    "reason": "cross-repo PR (mcp owner/repo mismatch)",
+                    "repo_flag": mcp_repo,
+                    "branch": branch,
+                }
+            )
+            return 0
+
+    pr_number = _pr_number_for_branch(branch)
+    if pr_number is None:
+        sys.stderr.write(
+            f"label-pr.py: FAILED: gh pr list --head {branch} で PR 番号を解決できませんでした（mcp 経路）\n"
+        )
+        _write_last_run(
+            {
+                "status": "failed",
+                "reason": "gh pr list --head failed (mcp)",
+                "branch": branch,
+            }
+        )
+        return 2
+
+    return _apply_labels_for_pr(pr_number)
+
+
+def _main() -> int:
+    payload = read_hook_input(hook_name="PostToolUse")  # Issue #1364
+    tool_name = get_tool_name(payload)
+
+    if tool_name == _MCP_CREATE_PR_TOOL:
+        return _handle_mcp_create_pr(payload)
+
+    if tool_name != "Bash":
+        return 0
+
+    command = get_command(payload)
+    if not _is_gh_pr_create(command):
+        return 0
+
+    # Issue #2226 / #2865: `-R`/`--repo` 指定時、セッションと同一リポジトリを
+    # 指しているだけなら通常どおり処理を継続する。異なる・判定不能な場合のみ
+    # `gh pr view`/`gh pr edit` の誤動作を避けるためスキップする。
+    repo_flag_match = _REPO_FLAG_RE.search(command)
+    if repo_flag_match:
+        repo_flag = repo_flag_match.group(1)
+        normalized_flag = _normalize_repo_ref(repo_flag)
+        session_repo = _session_repo(resolve_target_cwd(payload, command))
+        if session_repo is not None and normalized_flag == session_repo:
+            sys.stderr.write(
+                f"label-pr.py: -R/--repo {repo_flag!r} はセッションリポジトリ {session_repo!r} と"
+                "一致するため、ラベル付与を継続します\n"
+            )
+        else:
+            sys.stderr.write(
+                f"label-pr.py: skip: gh pr create に -R/--repo {repo_flag!r} が指定されています"
+                "（セッションリポジトリ以外への PR のため、ラベル付与をスキップします）\n"
+            )
+            _write_last_run(
+                {
+                    "status": "skipped",
+                    "reason": "cross-repo PR (-R/--repo specified)",
+                    "repo_flag": repo_flag,
+                    "command": command[:200],
+                }
+            )
+            return 0
+
+    # ここから先は「gh pr create の PostToolUse」経路。すべての exit 点で
+    # 発火履歴を残して silent skip を無くす（Issue #1445）。
+    output = get_tool_output(payload)
+
+    if not output.strip():
+        # output が空の場合は skip: `gh pr create` が失敗した / stdout を捕捉していない
+        sys.stderr.write("label-pr.py: skip: tool_response.output が空です\n")
+        _write_last_run(
+            {
+                "status": "skipped",
+                "reason": "empty tool output",
+                "command": command[:200],
+            }
+        )
+        return 0
+
+    match = _PR_URL_RE.search(output)
+    if not match:
+        # 非空だが PR URL が抽出できない → gh pr list --head <branch> で fallback 解決を試みる（#2048）
+        sys.stderr.write(
+            f"label-pr.py: PR URL not found in output: {output[:200]!r} — trying fallback via gh pr list --head\n"
+        )
+        fallback_number = _fetch_pr_number_by_branch(payload)
+        if fallback_number is None:
+            # fallback も失敗 → exit 2 で可視化（#1445 Scenario 3）
+            sys.stderr.write(
+                "label-pr.py: FAILED to extract PR number from output: fallback via gh pr list --head <branch> also failed\n"
+            )
+            _write_last_run(
+                {
+                    "status": "failed",
+                    "reason": "PR URL extraction failed",
+                    "output_head": output[:200],
+                }
+            )
+            return 2
+        sys.stderr.write(
+            f"label-pr.py: fallback resolved PR number via gh pr list --head: #{fallback_number}\n"
+        )
+        pr_number = fallback_number
+    else:
+        pr_number = match.group(1)
+
+    return _apply_labels_for_pr(pr_number)
 
 
 def main() -> int:

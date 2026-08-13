@@ -33,8 +33,8 @@ keywords:
     category: 機密情報取り扱い
     regex: 'APIキー.*確認|API key.*確認|トークン.*取得|token.*取得|パスワード.*確認|秘密鍵.*確認|認証情報.*確認|credential.*確認'
     reason: '機密情報の確認を AI に委ねるとセキュリティリスクになる'
-    example_bad: '- [ ] [AI確認] Bitwarden で API キーが取得できることを確認する'
-    example_good: '- [ ] [手動] Bitwarden で API キーが取得できることを確認する'
+    example_bad: '- [ ] [AI確認] .mise.toml から API キーが取得できることを確認する'
+    example_good: '- [ ] [手動] .mise.toml から API キーが取得できることを確認する'
 
   # カテゴリ 4: 法令・契約判断
   - id: legal_compliance

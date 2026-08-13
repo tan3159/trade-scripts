@@ -20,7 +20,6 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -28,7 +27,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.git_helpers import run_git as _run_git
+from _lib.hook_io import is_hook_enabled, read_hook_input
+from _lib.tidd_uvx import build_uvx_tidd_cmd
 
 
 def _resolve_cache_dir() -> Path:
@@ -78,13 +79,11 @@ def _gh(*args: str, timeout: int = 15) -> str | None:
 
 
 def _git(*args: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False, timeout=5
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    """Issue #2958: subprocess 実行部は `_lib.git_helpers.run_git()` に委譲する."""
+    result = _run_git(*args, timeout=5)
+    if result is None or result.returncode != 0:
         return None
-    return result.stdout.strip() if result.returncode == 0 else None
+    return result.stdout.strip()
 
 
 def _open_db() -> sqlite3.Connection:
@@ -148,8 +147,10 @@ def _classify_os_error(exc: OSError) -> tuple[str, str]:
     if isinstance(exc, PermissionError) or exc.errno == errno.EACCES:
         return (
             "permission",
-            f"解決手順: chmod 755 {_portable_path(_CACHE_DIR)}/ を実行してください（"
-            f"必要なら chmod 644 {_portable_path(_DB_PATH)} も併せて）。",
+            (
+                f"解決手順: chmod 755 {_portable_path(_CACHE_DIR)}/ を実行してください（"
+                f"必要なら chmod 644 {_portable_path(_DB_PATH)} も併せて）。"
+            ),
         )
     if exc.errno == errno.ENOSPC:
         return (
@@ -179,8 +180,10 @@ def _classify_sqlite_error(exc: sqlite3.Error) -> tuple[str, str]:
         if "database is locked" in msg or "locked" in msg:
             return (
                 "lock_timeout",
-                "解決手順: 他プロセスの Claude Code セッションを終了するか、"
-                f"lock file を削除してください（{_DB_PATH}-journal / -wal）。",
+                (
+                    "解決手順: 他プロセスの Claude Code セッションを終了するか、"
+                    f"lock file を削除してください（{_DB_PATH}-journal / -wal）。"
+                ),
             )
     return ("unknown", "")
 
@@ -368,10 +371,10 @@ def _run_health_check() -> None:
     exit 0 なら何も出力しない。exit != 0 なら stdout に警告 + stderr 先頭 20 行を出力する。
     hook 全体の exit code には影響しない。
 
-    consumer が `uv tool install` 経路で tidd_tools を導入した場合、`.venv` には
-    tidd_tools が入らないため `.venv/bin/python -m tidd_tools health-check` は
-    「No module named tidd_tools」で失敗し続ける。この場合は警告を出さず、
-    PATH 上の `tidd` 実行ファイルへフォールバックする（Issue #2211）。
+    consumer が tidd_tools を導入した場合、`.venv` には tidd_tools が入らないため
+    `.venv/bin/python -m tidd_tools health-check` は「No module named tidd_tools」で
+    失敗し続ける。この場合は警告を出さず、`uvx` 経由の tidd 実行（ゼロインストール実行方式）へ
+    フォールバックする（Issue #2211・#3087）。
     """
     if not is_hook_enabled("session-start-health-check"):
         return
@@ -399,6 +402,7 @@ def _run_health_check() -> None:
                 text=True,
                 timeout=60,
                 cwd=root,
+                check=False,
             )
         except (OSError, subprocess.TimeoutExpired):
             return
@@ -409,19 +413,20 @@ def _run_health_check() -> None:
         if _MODULE_NOT_FOUND_MARKER not in result.stderr:
             _report_health_check_failure(result)
             return
-        # .venv に tidd_tools がない consumer 環境 → tidd フォールバックへ進む
+        # .venv に tidd_tools がない consumer 環境 → uvx フォールバックへ進む
 
-    tidd_bin = shutil.which("tidd")
-    if tidd_bin is None:
+    uvx_cmd = build_uvx_tidd_cmd("health-check")
+    if uvx_cmd is None:
         return
 
     try:
         fallback_result = subprocess.run(
-            [tidd_bin, "health-check"],
+            uvx_cmd,
             capture_output=True,
             text=True,
             timeout=60,
             cwd=root,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return
@@ -439,7 +444,7 @@ def _run_cache() -> int:
 
     # Issue #1459: 古い BG PID の zombie 掃除（24 時間 threshold）
     try:
-        from _lib.gh_cache import _cleanup_stale_bg_pids  # noqa: PLC0415
+        from _lib.gh_cache import _cleanup_stale_bg_pids
 
         _cleanup_stale_bg_pids()
     except (ImportError, OSError):

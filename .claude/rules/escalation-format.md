@@ -31,4 +31,4 @@ B. <選択肢 2> — <トレードオフ>
 
 - `.claude/rules/decision-journal.md` — 回答を受けたら `docs/decisions/` に自動記録する
 
-詳細（良い例・悪い例・適用ポイント・needs-human-input セクション書式）: [docs/reference/escalation-format-guide.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/escalation-format-guide.md)
+詳細（良い例・悪い例・適用ポイント・needs-human-input セクション書式）: docs/reference/escalation-format-guide.md

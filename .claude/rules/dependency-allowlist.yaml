@@ -1,0 +1,65 @@
+# 依存パッケージ許可リスト（Issue #2561）
+#
+# check-dependency-allowlist.py hook がこのリストを読み込み、
+# pyproject.toml への dependencies 追加を照合する。
+#
+# パッケージ名の照合: PEP 503 正規化（小文字・ハイフン/アンダースコア/ドット 同一視）
+# 追加方法: 新規パッケージを採用するときは allowlist への追加 PR を同梱すること
+#
+# 初期シード（2026-07-26）: リポジトリ内の既存 pyproject.toml の全依存より抽出
+
+packages:
+  # ── tidd_tools / 全 project 共通ビルドシステム ────────────────────
+  - hatchling
+
+  # ── tidd_tools runtime 依存 ───────────────────────────────────────
+  - httpx           # OpenAI 互換 API 呼び出し用 HTTP client（Issue #3116）
+  - platformdirs
+  - pyjwt           # PyJWT[crypto] の正規化名
+  - pyyaml          # PyYAML の正規化名
+  - cryptography    # PyJWT[crypto] の extras 依存
+
+  # ── tidd_tools dev 依存 ───────────────────────────────────────────
+  - pytest
+  - pytest-mock
+  - pytest-cov
+  - pytest-bdd
+  - pytest-xdist
+  - mutmut
+  - mypy
+  - ruff
+  - syrupy             # スナップショットテスト（Issue #2592）
+  - vulture            # 未使用コード検出（Issue #3058）
+
+  # ── rulesync（AI ツール設定生成 CLI・Issue #3196）─────────────
+  - rulesync           # hooks 設定の Claude Code / Codex 両対応生成
+
+  # tests/step_defs/test_issue_2768.py が publish.core を import するため、
+  # workspace メンバーとして明示依存させている（Issue #2782）。
+  - publish
+
+  # ── tidd_tools optional (embeddings) ─────────────────────────────
+  - model2vec
+
+  # ── publish runtime 依存 ──────────────────────────────────────────
+  - python-frontmatter
+  - markdown
+  - google-api-python-client
+  - google-auth-oauthlib
+  - beautifulsoup4   # beautifulsoup4 の正規化名
+  - nh3
+  - filelock
+
+  # ── publish dev 依存 ─────────────────────────────────────────────
+  # pytest, pytest-mock, pytest-cov, mypy は tidd_tools の項目と共通
+
+  # ── example dev 依存 ─────────────────────────────────────────────
+  # pytest, pytest-cov, mypy は tidd_tools の項目と共通
+
+  # ── consumer 用 tidd-tools 配布（git+ URL） ───────────────────────
+  # docs/setup/tidd-tools-pat-setup.md での consumer 利用手順:
+  #   uv add "tidd-tools @ git+https://github.com/..."
+  # パッケージ名部分 "tidd-tools" を allowlist に含めて通過させる。
+  # git+ URL 全体はパッケージ名を抽出してから照合するか、
+  # この名前で正規化一致する。
+  - tidd-tools

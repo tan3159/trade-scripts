@@ -1,0 +1,14 @@
+{
+  "name": "ai-dev-handbook-consumer",
+  "private": true,
+  "devDependencies": {
+    "rulesync": "16.7.0"
+  },
+  "overrides": {
+    "rulesync": {
+      "gray-matter": {
+        "js-yaml": "^3.13.1"
+      }
+    }
+  }
+}

@@ -1,7 +1,9 @@
 ---
 name: create-issue
-description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成する（Issue #1302 で Anthropic API 全廃）。バグ・改善点のコンテキストを渡すと必須セクション（## 背景 / ## やること / feat/fix なら ## 振る舞い）を含む Markdown 本文を返し、`gh issue create` に流し込める。
+description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成する（Issue #1302 で Anthropic API 全廃）。バグ・改善点のコンテキストを渡すと必須セクション（## 背景 / ## やること / feat/fix なら ## 振る舞い）を含む Markdown 本文を返し、`mcp__github__create_issue` で起票する。
 ---
+
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
 
 # /create-issue
 
@@ -39,15 +41,11 @@ create-issue: 未知の type '{type}'。有効値: feat/fix/docs/refactor/build/
 既存 open Issue の `priority` ラベル分布を取得して提示する。これにより issue-writer subagent が
 相対評価に基づいた priority を選択できる。
 
-```bash
-gh issue list --repo <owner>/<repo> --state open \
-  --label "priority: critical" --limit 1000 --json number | jq 'length'
-gh issue list --repo <owner>/<repo> --state open \
-  --label "priority: high" --limit 1000 --json number | jq 'length'
-gh issue list --repo <owner>/<repo> --state open \
-  --label "priority: medium" --limit 1000 --json number | jq 'length'
-gh issue list --repo <owner>/<repo> --state open \
-  --label "priority: low" --limit 1000 --json number | jq 'length'
+```
+mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: critical"], per_page: 100})  # → 件数をカウント
+mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: high"], per_page: 100})
+mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: medium"], per_page: 100})
+mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: low"], per_page: 100})
 ```
 
 取得に失敗した場合（ネットワーク障害・API レート制限等）はエラーをスキップして STEP 3 に進む。
@@ -57,7 +55,7 @@ gh issue list --repo <owner>/<repo> --state open \
 以下のプロンプトで Agent tool を呼ぶ。STEP 2 で取得した分布を `priority_distribution` として渡す:
 
 ```
-Agent(
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_writer", task_name="issue_writer", message=...) に読み替え
   subagent_type="issue-writer",
   description="Issue 本文生成",
   prompt=<type / title-short / context / priority_distribution を含むプロンプト>
@@ -100,11 +98,10 @@ subagent は `.claude/agents/issue-writer.md` の `output_format` に従い次�
 
 ### STEP 5: Issue 起票
 
-生成された title / body / labels で `gh issue create` を実行する:
+生成された title / body / labels で `mcp__github__create_issue` を実行する:
 
-```bash
-gh issue create --title "<title>" --body "<body>" \
-  --label "type: <type>" --label "priority: <priority>"
+```
+mcp__github__create_issue({owner, repo, title: "<title>", body: "<body>", labels: ["type: <type>", "priority: <priority>"]})
 ```
 
 `priority:` ラベルは subagent が相対判定した値を使う。取得失敗等で分布が提示されなかった場合は
@@ -124,14 +121,14 @@ Claude Code の Agent tool 経由で subagent を起動することで、Claude 
 
 Claude Code は `.claude/skills/*/SKILL.md` を自動検出するため、ユーザーは `/create-issue` として本 skill を呼べる（`.claude/commands/*.md` を別途用意する必要はない・リポジトリ規約）。呼び出されると Claude Code が Skill tool 経由で本ファイルの STEP 1-6 を順に解釈・実行する。
 
-**exit code のセマンティクス:** 本 skill は Claude Code の Skill tool 経由で LLM が STEP を解釈実行するため、shell script のような「厳密な exit code」を保証する仕組みではない。Gherkin の `exit code 2` は「STDERR にエラーメッセージが表示され、`gh issue create` を実行せず Issue 未起票で終了する」という **観測可能な状態** を指す。STEP 1 の type 検証、STEP 4 の品質検証リトライ上限超過は、この観測可能な終了状態を目指す指針である。
+**exit code のセマンティクス:** 本 skill は Claude Code の Skill tool 経由で LLM が STEP を解釈実行するため、shell script のような「厳密な exit code」を保証する仕組みではない。Gherkin の `exit code 2` は「STDERR にエラーメッセージが表示され、Issue 未起票で終了する」という **観測可能な状態** を指す。STEP 1 の type 検証、STEP 4 の品質検証リトライ上限超過は、この観測可能な終了状態を目指す指針である。
 
 ## 呼び出し元パス
 
 - **手動（メインの用途）**: Claude Code セッション内でユーザーが `/create-issue` を直接実行する
 - **自動起票フロー (`analyze_loop_errors.py` / `watch_circleci_failures.py`)**: 前者は `.claude/hooks/analyze-loop-on-stop.py` から `subprocess.Popen` で detach された Python サブプロセス、後者は `.circleci/config.yml` の job から起動される CircleCI 上の Python プロセスとして動く。どちらも **Claude Code CLI の LLM 会話ループの外側** で動くため、Agent tool は原理的に呼び出せない（Agent tool は Claude Code CLI 本体のツール呼び出しとしてのみ発火する）。したがって自動起票フローは skill 経由には切り替えず、`shared/llm_issue_body.py` の `enhance_issue_body()` no-op fallback により **常に template body のみ** で起票する（Anthropic API 呼び出しは #1281 / #1302 で廃止済み）。意味的な強化が必要な場合は、起票された Issue を後から Claude Code セッション内で `/issue-review` skill にかけて品質判定する運用でカバーする。
 
-**関連参照:** [docs/reference/create-issue-skill.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/create-issue-skill.md) の「呼び出しフロー」節に本 skill の起動シーケンス、`shared/llm_issue_body.py` の docstring に自動フロー側の fallback 挙動を記載している。
+**関連参照:** docs/reference/create-issue-skill.md の「呼び出しフロー」節に本 skill の起動シーケンス、`shared/llm_issue_body.py` の docstring に自動フロー側の fallback 挙動を記載している。
 
 ## エラー処理（異常系）
 
@@ -155,11 +152,11 @@ Agent tool が subagent 起動に失敗した場合（例: `.claude/agents/issue
 
 ### priority 分布取得失敗（STEP 2）
 
-`gh issue list` が一時的に利用不可の場合（ネットワーク障害・API レート制限・認証切れ等）、
+`mcp__github__list_issues` が一時的に利用不可の場合（ネットワーク障害・API レート制限・認証切れ等）、
 以下のメッセージを **stderr** に表示してからエラーをスキップし、STEP 3 に進む（分布提示なし）:
 
 ```
-create-issue: WARN priority 分布取得に失敗しました: <エラー概要>
+create-issue: WARN priority 分布取得に失敗しました（mcp__github__list_issues エラー）: <エラー概要>
 ```
 
 この場合、issue-writer subagent は `.claude/rules/issue-creation.md` の相対判定基準を参照し、
@@ -180,5 +177,5 @@ Issue は起票しない。
 - `.claude/agents/issue-writer.md` — subagent 定義
 - `.claude/rules/issue-creation.md` — Issue 品質・フォーマット規約
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- [docs/reference/create-issue-skill.md](https://github.com/being-gaia-plan/ai-dev-handbook/blob/main/docs/reference/create-issue-skill.md) — 詳細ドキュメント
+- docs/reference/create-issue-skill.md — 詳細ドキュメント
 - `tidd_tools.shared.llm_issue_body` モジュール — 互換性スタブ（常に fallback）

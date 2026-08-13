@@ -21,14 +21,23 @@ stdlib のみ使用。
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_command, get_tool_name, is_hook_enabled, read_hook_input  # noqa: E402
+from _lib.hook_io import (
+    get_command,
+    get_tool_name,
+    is_hook_enabled,
+    read_hook_input,
+)
+from _lib.override_markers import find_invalid_syntax, has_override_marker
+
+# Issue #2998 レビュー指摘: `_lib.yaru_sections` は `_lib.gh_cache` を経由し import 時に
+# `git remote get-url origin` を実行するため、matcher: "Bash" であらゆる Bash コマンドに
+# 反応する本 hook では、`gh issue close` と特定できた後にのみ遅延 import する
+# （auto-tick-issue-items.py と同様のパターン）。
 
 # gh issue close コマンドから issue 番号を抽出
 _GH_ISSUE_CLOSE_RE = re.compile(
@@ -38,27 +47,8 @@ _GH_ISSUE_CLOSE_RE = re.compile(
 # 引数中の Issue 番号 (最初の純粋な整数トークン)
 _ISSUE_NUM_RE = re.compile(r"(?<!\S)(\d+)(?!\S)")
 
-# やること セクション抽出
-_YARU_SECTION_RE = re.compile(
-    r"^##\s*やること\s*$(.*?)(?=^##\s|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-_UNCHECKED_ITEM_RE = re.compile(r"^\s*-\s*\[\s\]\s*(.+)$", re.MULTILINE)
-
-# override marker: <!-- yaru-tracking: #NNN -->
-_YARU_TRACKING_RE = re.compile(
-    r"<!--\s*yaru-tracking\s*:\s*((?:(?!-->).)+?)\s*-->",
-    re.DOTALL,
-)
-# 無効書式 (コロンなし or 理由空)
-_YARU_TRACKING_INVALID_RE = re.compile(
-    r"<!--\s*yaru-tracking\s*-->" r"|" r"<!--\s*yaru-tracking\s*:\s*-->",
-    re.DOTALL,
-)
-
-# [手動] / [AI確認] / [AI確認-post-merge] プレフィックス
-# Issue #1543: Issue #1402 で新設した [AI確認-post-merge] タグも許容する
-_MANUAL_OR_AI_CONFIRM_RE = re.compile(r"^\s*\[(手動|AI確認(-post-merge)?)\]")
+# override marker: <!-- yaru-tracking: #NNN --> (Issue #2954: _lib.override_markers に統一)
+_YARU_TRACKING_MARKER = "yaru-tracking"
 
 
 def _extract_issue_number(command: str) -> int | None:
@@ -75,58 +65,18 @@ def _extract_issue_number(command: str) -> int | None:
     return None
 
 
-def _fetch_issue_body(issue_number: int) -> str | None:
-    """gh issue view で Issue body を取得する.
-
-    テスト用に ``HOOK_TEST_ISSUE_BODY`` 環境変数で override 可能。
-    """
-    override = os.environ.get("HOOK_TEST_ISSUE_BODY")
-    if override is not None:
-        return override
-    try:
-        result = subprocess.run(
-            ["gh", "issue", "view", str(issue_number), "--json", "body", "-q", ".body"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    return result.stdout
-
-
-def _extract_yaru_section(body: str) -> str | None:
-    m = _YARU_SECTION_RE.search(body)
-    if not m:
-        return None
-    return m.group(1)
-
-
-def _extract_unchecked_items(yaru_section: str) -> list[str]:
-    return [m.group(1).strip() for m in _UNCHECKED_ITEM_RE.finditer(yaru_section)]
-
-
 def _has_valid_tracking_marker(body: str) -> bool:
-    m = _YARU_TRACKING_RE.search(body)
-    if m is None:
-        return False
-    reason = m.group(1).strip()
-    return bool(reason)
+    return has_override_marker(body, _YARU_TRACKING_MARKER)
 
 
 def _has_invalid_tracking_marker(body: str) -> bool:
-    m = _YARU_TRACKING_INVALID_RE.search(body)
-    if m is None:
-        return False
-    # 有効書式が同時に存在する場合は valid が優先
-    return not _has_valid_tracking_marker(body)
+    return bool(find_invalid_syntax(body, [_YARU_TRACKING_MARKER]))
 
 
 def _all_remaining_are_manual_or_ai_confirm(unchecked_items: list[str]) -> bool:
-    return all(_MANUAL_OR_AI_CONFIRM_RE.match(it) for it in unchecked_items)
+    from _lib.yaru_sections import has_manual_or_ai_confirm_prefix
+
+    return all(has_manual_or_ai_confirm_prefix(it) for it in unchecked_items)
 
 
 def _main() -> int:
@@ -143,6 +93,10 @@ def _main() -> int:
     if issue_number is None:
         # gh issue close コマンドでなければ対象外
         return 0
+
+    from _lib.yaru_sections import extract_section as _extract_yaru_section
+    from _lib.yaru_sections import fetch_issue_body as _fetch_issue_body
+    from _lib.yaru_sections import parse_unchecked_items as _extract_unchecked_items
 
     body = _fetch_issue_body(issue_number)
     if body is None:
@@ -175,6 +129,30 @@ def _main() -> int:
     # tracking marker で bypass
     if _has_valid_tracking_marker(body):
         return 0
+
+    # Issue #3119: gh_cache（TTL 300 秒・SWR）が編集前 body を保持し続け、直後に
+    # やること checkbox を更新して close し直しても stale hit で誤ブロックし続ける
+    # 問題への対応。ブロックを確定させる前に 1 回だけ cache を bypass して最新
+    # body を再取得し、再判定する。
+    from _lib.yaru_sections import (
+        fetch_issue_body_bypass_cache as _fetch_issue_body_fresh,
+    )
+
+    fresh_body = _fetch_issue_body_fresh(issue_number)
+    if fresh_body is not None:
+        fresh_yaru_section = _extract_yaru_section(fresh_body)
+        fresh_unchecked_items = (
+            _extract_unchecked_items(fresh_yaru_section)
+            if fresh_yaru_section is not None
+            else []
+        )
+        if not fresh_unchecked_items or _all_remaining_are_manual_or_ai_confirm(
+            fresh_unchecked_items
+        ):
+            # 最新 body では全チェック済み (または残りが [手動]/[AI確認] のみ) → ブロックしない
+            return 0
+        # 再取得しても未チェックが残る場合は、最新の状態を使って従来どおりブロックする
+        unchecked_items = fresh_unchecked_items
 
     # Block
     sys.stderr.write(

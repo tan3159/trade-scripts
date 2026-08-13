@@ -27,23 +27,11 @@ model: sonnet
     - `tidd_tools/ai_review/**`
     - `.claude/hooks/validate-issue.py`
     - `.claude/hooks/require-issue.py`
-- **Anthropic SDK 直接呼び出しは禁止**: 本 subagent は Claude Code の Agent tool 経由で
-  動作するため、`import anthropic` 相当のコードは書きません（`ban-anthropic-import` hook で
-  機械強制）
-
-## output_format
-
-以下の JSON を **最終メッセージの末尾コードブロックとして** 返してください。余計な文章は書かず
-JSON のみで応答してください:
-
-```json
-{
-  "verdict": "PASS",
-  "pain_score": 3,
-  "pain_reason": "「/issue-next がフォーマット不備の Issue を選定してしまい実装が正しく完了できない」と観測可能な失敗が明記されている",
-  "gherkin_issues": [],
-  "boundary_missing": false,
-  "boundary_reason": "critical モジュール参照なし（判定対象外）"
+  "boundary_reason": "critical モジュール参照なし（判定対象外）",
+  "prose_only_unjustified": false,
+  "prose_only_reason": "やること項目は CLI サブコマンド追加を伴い機械強制されている",
+  "size_over_1000_possible": false,
+  "size_reason": "コード変更を伴うやること項目が 1 件・feat/fix のテスト倍率考慮でも 1000 行超の可能性は低い"
 }
 ```
 
@@ -57,11 +45,16 @@ JSON のみで応答してください:
 | `gherkin_issues` | string[] | Gherkin シナリオに見つかった問題点（空配列可） |
 | `boundary_missing` | bool | critical モジュール参照 Issue で境界値異常系 Scenario が欠落しているか（Issue #1288・#1378） |
 | `boundary_reason` | string | `boundary_missing` の根拠（critical モジュール参照なしなら「判定対象外」） |
+| `prose_only_unjustified` | bool | 機械強制へ置き換え可能なのに prose のみで完結する項目があるか（Issue #2896） |
+| `prose_only_reason` | string | `prose_only_unjustified` の根拠（除外基準に該当する場合はその番号を明記） |
+| `size_over_1000_possible` | bool | コード変更を伴うやること項目の規模から 1000 行超になる可能性があるか（Issue #3086）。`type: docs`/`research` は常に false |
+| `size_reason` | string | `size_over_1000_possible` の根拠（判定対象外なら「判定対象外」・対象なら根拠ファイル列挙または可能性が低い理由） |
 
 ### 判定ルール
 
-- **PASS**: `pain_score >= 3` かつ `gherkin_issues` が空 かつ `boundary_missing == false`（feat/fix 系のみ Gherkin 必須）
-- **FAIL**: `pain_score <= 2` または `gherkin_issues` に問題あり または `boundary_missing == true`
+- **PASS**: `pain_score >= 3` かつ `gherkin_issues` が空 かつ `boundary_missing == false` かつ `prose_only_unjustified == false`（feat/fix 系のみ Gherkin 必須）
+- **FAIL**: `pain_score <= 2` または `gherkin_issues` に問題あり または `boundary_missing == true` または `prose_only_unjustified == true`
+- **`size_over_1000_possible` は合否判定に使わない（Issue #3086）**: `size_over_1000_possible: true` であっても `verdict` を FAIL にしてはならない。分割提案は非ブロッキングコメントで行う。
 
 ### `gherkin_issues` の書き方
 
@@ -82,8 +75,4 @@ JSON のみで応答してください:
 5. 存在する場合: `boundary_missing: false`、`boundary_reason: "境界値 Scenario N 件検出"`
 6. 存在しない場合: `boundary_missing: true`、`boundary_reason: "critical モジュール参照だが境界値異常系 Scenario が欠落"`
 
-## 関連
-
-- `.claude/rules/issue-creation.md` — 詳細な判定基準
-- `.claude/skills/issue-review/SKILL.md` — 呼び出し元 skill
-- `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
+- `docs/decisions/2026-08-03-diff-size-early-warning-layers.md` — A+C 採用・誤検知緩和策の決定経緯
