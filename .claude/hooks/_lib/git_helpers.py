@@ -21,8 +21,10 @@ stdlib のみ使用（hooks ディレクトリは外部依存を持たない）�
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 # 従来の各 hook 実装で使われていた timeout 値のばらつきを集約したデフォルト。
 DEFAULT_TIMEOUT_SEC = 10.0
@@ -78,10 +80,35 @@ def git_toplevel(
         リポジトリルートの絶対パス。git リポジトリでない・失敗時は ``None``。
     """
     result = run_git("rev-parse", "--show-toplevel", cwd=cwd, timeout=timeout)
-    if result is None or result.returncode != 0:
+    if result is not None and result.returncode == 0:
+        stripped = result.stdout.strip()
+        if stripped:
+            return stripped
+    if cwd is not None:
         return None
-    stripped = result.stdout.strip()
-    return stripped or None
+    return resolve_repo_root(timeout=timeout)
+
+
+def resolve_repo_root(timeout: float = DEFAULT_TIMEOUT_SEC) -> str | None:
+    """プロセス CWD に依存せず、セッションのリポジトリルートを解決する."""
+    candidates: list[str] = []
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR")
+    if project_dir:
+        candidates.append(project_dir)
+    candidates.append(str(Path(__file__).resolve().parents[3]))
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        result = run_git(
+            "-C", candidate, "rev-parse", "--show-toplevel", timeout=timeout
+        )
+        if result is not None and result.returncode == 0:
+            root = result.stdout.strip()
+            if root:
+                return root
+    return None
 
 
 def run_git_in_repo(

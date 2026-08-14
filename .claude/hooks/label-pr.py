@@ -79,7 +79,9 @@ _PR_URL_RE = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/(\d+)")
 # Issue #2226: `-R`/`--repo` フラグ検出（セッションリポジトリ以外への PR 作成）
 _REPO_FLAG_RE = re.compile(r"(?:^|\s)(?:-R|--repo)(?:=|\s+)(\S+)")
 # Issue #2865: gh remote URL（ssh/https どちらの形式でも owner/repo を抽出）
-_REMOTE_OWNER_REPO_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
+_REMOTE_OWNER_REPO_RE = re.compile(
+    r"(?:github\.com|github-[^/:]+)[:/]([^/]+/[^/]+?)(?:\.git)?/?$"
+)
 # Issue #2865: PR 作成が mcp__github__create_pull_request（GitHub MCP tool）経由のときの tool_name
 _MCP_CREATE_PR_TOOL = "mcp__github__create_pull_request"
 
@@ -766,6 +768,9 @@ def _main() -> int:
     # 指しているだけなら通常どおり処理を継続する。異なる・判定不能な場合のみ
     # `gh pr view`/`gh pr edit` の誤動作を避けるためスキップする。
     repo_flag_match = _REPO_FLAG_RE.search(command)
+    repo_flag: str | None = None
+    normalized_flag: str | None = None
+    session_repo: str | None = None
     if repo_flag_match:
         repo_flag = repo_flag_match.group(1)
         normalized_flag = _normalize_repo_ref(repo_flag)
@@ -775,7 +780,7 @@ def _main() -> int:
                 f"label-pr.py: -R/--repo {repo_flag!r} はセッションリポジトリ {session_repo!r} と"
                 "一致するため、ラベル付与を継続します\n"
             )
-        else:
+        elif session_repo is not None:
             sys.stderr.write(
                 f"label-pr.py: skip: gh pr create に -R/--repo {repo_flag!r} が指定されています"
                 "（セッションリポジトリ以外への PR のため、ラベル付与をスキップします）\n"
@@ -832,6 +837,22 @@ def _main() -> int:
         pr_number = fallback_number
     else:
         pr_number = match.group(1)
+
+    if repo_flag_match and session_repo is None:
+        pr_repo = _owner_repo_for_pr(pr_number)
+        if normalized_flag is None or pr_repo != normalized_flag:
+            sys.stderr.write(
+                "label-pr.py: skip: -R/--repo と PR の headRepository が一致しません\n"
+            )
+            _write_last_run(
+                {
+                    "status": "skipped",
+                    "reason": "cross-repo PR (headRepository mismatch)",
+                    "repo_flag": repo_flag,
+                    "pr_number": pr_number,
+                }
+            )
+            return 0
 
     return _apply_labels_for_pr(pr_number)
 
