@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # 実装制約ルール（やりすぎ防止）
 

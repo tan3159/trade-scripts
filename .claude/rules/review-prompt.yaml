@@ -35,13 +35,31 @@ severity_rules:
       Nit / style / suggestion.
       タイポ・スタイル・定性的な提案のみ。
 
-  # レビュー前の chain-of-thought（CoT）手順
+  # レビュー前の chain-of-thought（CoT）手順（#3832: 敵対的検証思考）
+  #
+  # Sycophancy（自己肯定バイアス）対策として、著者の意図を信頼せず
+  # 「この diff を壊す」ことを目的に検証する Attack → Self-Refutation → Filter
+  # の 3 段階を組み込む。
   chain_of_thought:
     steps:
+      - >
+        あなたは著者に同意したい楽観的なレビュアーではなく、この PR を壊すことを
+        目的とした敵対的検証者（Skeptic）である。「もっともらしいが動かない」を
+        前提に検証する
       - "diff が生成する実際の runtime behavior を特定する"
       - >
         「この behavior が現在 outage / data loss / security breach /
         wrong observable outcome を引き起こすか」を自問する
+      - >
+        Attack: この diff を壊す具体的な入力・境界値・タイミング・並行実行の
+        攻撃ベクトルを最低1つ列挙する（曖昧な「〜かもしれない」は不可）
+      - >
+        Self-Refutation: 列挙した攻撃ベクトルについて「この懸念は誤りではないか」を
+        自問し、実際の runtime path・呼び出し元の制約（型・呼び出し順序・
+        既存のガード節）で棄却できないか検証する
+      - >
+        Filter: Self-Refutation を生き残った懸念のみを指摘候補として残す。
+        棄却できた懸念は指摘しない
       - >
         Yes なら diff の file:line を引用してから severity を選ぶ。
         No（仮想的・防御的な懸念のみ）なら MEDIUM または LOW を選ぶ
@@ -58,6 +76,11 @@ severity_rules:
       - >
         ドキュメントと実装の乖離を HIGH にする前に、grep でファイルを確認する。
         アンカー名・行番号が異なるだけで実装が存在する場合は LOW 以下。
+      - >
+        CRITICAL / HIGH の指摘には反例（Counter-Example）の提示義務がある。
+        Input（具体的な入力値・トリガー条件）→ Path（実際に通過する diff 上の
+        code path）→ Outcome（観測可能な誤った結果）の 3 点を示せない指摘は
+        MEDIUM に降格するか削除する。
 
   verdict_rules:
     approve: "CRITICAL / HIGH 指摘が0件のとき APPROVE を返す"

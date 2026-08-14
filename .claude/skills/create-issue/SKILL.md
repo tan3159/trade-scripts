@@ -1,9 +1,9 @@
 ---
 name: create-issue
-description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成する（Issue #1302 で Anthropic API 全廃）。バグ・改善点のコンテキストを渡すと必須セクション（## 背景 / ## やること / feat/fix なら ## 振る舞い）を含む Markdown 本文を返し、`mcp__github__create_issue` で起票する。
+description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成する（Issue #1302 で Anthropic API 全廃）。バグ・改善点のコンテキストを渡すと必須セクション（## 背景 / ## やること / feat/fix なら ## 振る舞い）を含む Markdown 本文を返し、`gh issue create` で起票する。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # /create-issue
 
@@ -42,10 +42,10 @@ create-issue: 未知の type '{type}'。有効値: feat/fix/docs/refactor/build/
 相対評価に基づいた priority を選択できる。
 
 ```
-mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: critical"], per_page: 100})  # → 件数をカウント
-mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: high"], per_page: 100})
-mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: medium"], per_page: 100})
-mcp__github__list_issues({owner, repo, state: "open", labels: ["priority: low"], per_page: 100})
+gh issue list --state open --label "priority: critical" --limit 100 --json number | jq length  # → 件数をカウント
+gh issue list --state open --label "priority: high" --limit 100 --json number | jq length
+gh issue list --state open --label "priority: medium" --limit 100 --json number | jq length
+gh issue list --state open --label "priority: low" --limit 100 --json number | jq length
 ```
 
 取得に失敗した場合（ネットワーク障害・API レート制限等）はエラーをスキップして STEP 3 に進む。
@@ -98,10 +98,10 @@ subagent は `.claude/agents/issue-writer.md` の `output_format` に従い次�
 
 ### STEP 5: Issue 起票
 
-生成された title / body / labels で `mcp__github__create_issue` を実行する:
+生成された title / body / labels で `gh issue create` を実行する:
 
 ```
-mcp__github__create_issue({owner, repo, title: "<title>", body: "<body>", labels: ["type: <type>", "priority: <priority>"]})
+gh issue create --title "<title>" --body "<body>" --label "type: <type>" --label "priority: <priority>"
 ```
 
 `priority:` ラベルは subagent が相対判定した値を使う。取得失敗等で分布が提示されなかった場合は
@@ -152,11 +152,11 @@ Agent tool が subagent 起動に失敗した場合（例: `.claude/agents/issue
 
 ### priority 分布取得失敗（STEP 2）
 
-`mcp__github__list_issues` が一時的に利用不可の場合（ネットワーク障害・API レート制限・認証切れ等）、
+`gh issue list` が一時的に利用不可の場合（ネットワーク障害・API レート制限・認証切れ等）、
 以下のメッセージを **stderr** に表示してからエラーをスキップし、STEP 3 に進む（分布提示なし）:
 
 ```
-create-issue: WARN priority 分布取得に失敗しました（mcp__github__list_issues エラー）: <エラー概要>
+create-issue: WARN priority 分布取得に失敗しました（gh issue list エラー）: <エラー概要>
 ```
 
 この場合、issue-writer subagent は `.claude/rules/issue-creation.md` の相対判定基準を参照し、

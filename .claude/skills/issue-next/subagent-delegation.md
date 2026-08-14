@@ -1,6 +1,6 @@
 # subagent 委譲: 機械検証・park 処理（Issue #2452）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` の STEP 2（issue-implementer 委譲）・STEP 5 リトライループ（issue-fixer 委譲）で
 共通する完了報告の機械検証手順と park 処理を定義する。
@@ -38,7 +38,7 @@ issue-implementer の多階層委譲時に実際に約1時間発生した）。
 正常終了報告（`PR: #<N>` / `branch: <name>` / `worktree: <path>`）を受けたら、報告された PR 番号を
 以下 3 点で検証する。**いずれか 1 つでも不一致なら park 扱い**にする:
 
-1. **PR 実在・OPEN:** `mcp__github__get_pull_request({owner, repo, pull_number: <報告PR番号>})` が成功し、
+1. **PR 実在・OPEN:** `gh pr view <報告PR番号> --json state,body,commits` が成功し、
    かつ `state` が `OPEN` であること（closed/merged 番号の誤報告を弾く）
 2. **closes 記載:** 返り値の `body` または commits の中に `closes #<N>` が含まれること
 3. **TDD 未実施の疑い:** `tidd tdd-check <報告PR番号>` を実行し exit code を見る。exit 0 なら疑いなし、
@@ -46,18 +46,19 @@ issue-implementer の多階層委譲時に実際に約1時間発生した）。
    から共有・#2895）。exit 2（PR/git 取得失敗）は機械検証の実行エラーとして park 扱いにする
 
 **契約違反判定（#2542）:** 検証 1 で `state` が `MERGED` の場合は誤報告ではなく **subagent の契約逸脱**
-（責務は `mcp__github__create_pull_request` で終端・agent 定義の禁止事項違反）として扱う。以下の機械検証を実行する:
+（責務は `gh pr create` で終端・agent 定義の禁止事項違反）として扱う。以下の機械検証を実行する:
 
-```
-pr = mcp__github__get_pull_request({owner, repo, pull_number: <報告PR番号>})
-if pr.state == "MERGED":
-  raise "契約違反: subagent 報告時点で PR #<報告PR番号> が MERGED です（責務は create_pull_request で終端・#2542）"
+```bash
+state=$(gh pr view <報告PR番号> --json state -q .state)
+if [ "$state" = "MERGED" ]; then
+  echo "契約違反: subagent 報告時点で PR #<報告PR番号> が MERGED です（責務は gh pr create で終端・#2542）" >&2
+fi
 ```
 
 exit 1（契約違反）の場合は park 処理に加えて:
 
 - Issue に「issue-implementer が契約を逸脱して PR #X をマージした（#2542）」とコメント記録する
-- **マージ済みコードを親セッションが直接検証する**（`mcp__github__get_pull_request_diff({owner, repo, pull_number: <PR番号>})` を確認し、変更ファイルに
+- **マージ済みコードを親セッションが直接検証する**（`gh pr diff <PR番号>` を確認し、変更ファイルに
   `tidd_tools/ai_review/` が含まれる parser critical PR なら
   `parser-critical-pr.md` に従い事後の異バックエンド合議レビューを実施する。欠陥が見つかれば Issue 起票）
 
@@ -138,14 +139,11 @@ tidd pre-flight
 cd <対象 worktree>
 git push origin <branch>
 ```
-```
-mcp__github__create_pull_request({
-  owner, repo,
-  title: "<type>(<scope>): #<N> <タイトル>",
-  body: "closes #<N>\n\n## 背景\nこのPRはissue-implementer subagentが報告なしで終了したため、コミット済み作業を親セッションが回収して作成した（Issue #2668）。",
-  head: "<branch>",
-  base: "main"
-})
+```bash
+gh pr create \
+  --title "<type>(<scope>): #<N> <タイトル>" \
+  --body "closes #<N>\n\n## 背景\nこのPRはissue-implementer subagentが報告なしで終了したため、コミット済み作業を親セッションが回収して作成した（Issue #2668）。" \
+  --head "<branch>" --base main
 ```
 
 PR が作成できたら正常終了報告（`PR: #<PR番号>` / `branch: <branch>` / `worktree: <worktree パス>`）として扱い、STEP 2 の機械検証（PR 実在・OPEN / closes 記載 / TDD 未実施疑い）を実行する。検証を満たしたら STEP 3 へ進む。
@@ -205,10 +203,11 @@ state クリーンアップ（`issue-next-state clear <N>` による state フ�
 （**契約違反判定・#2542**: issue-fixer の責務は push で終端。報告受領時点で PR が MERGED なら
 STEP 2 と同じ契約違反として扱い、マージ済みコードを親セッションが直接検証する）:
 
-```
-pr = mcp__github__get_pull_request({owner, repo, pull_number: <PR番号>})
-if pr.state == "MERGED":
-  raise "契約違反: subagent 報告時点で PR #<PR番号> が MERGED です（責務は push で終端・#2542）"
+```bash
+state=$(gh pr view <PR番号> --json state -q .state)
+if [ "$state" = "MERGED" ]; then
+  echo "契約違反: subagent 報告時点で PR #<PR番号> が MERGED です（責務は push で終端・#2542）" >&2
+fi
 ```
 
 次に push された SHA を検証する:

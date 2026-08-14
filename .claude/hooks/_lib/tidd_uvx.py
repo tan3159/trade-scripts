@@ -15,6 +15,15 @@ Issue #3683: 上流 URL は `.copier-answers.yml` の `_src_path` から解決�
 環境変数 `TIDD_UVX_SPEC` で upstream の git spec を上書きできる
 （`notify-copier-staleness.py` の `TIDD_COPIER_UPSTREAM_URL` と同じ考え方。テスト・フォーク用）。
 
+Issue #3768: 上記は hook 内部が呼び出すたびに `.copier-answers.yml` を動的解決するため
+版ずれが起きないが、**ターミナルから手動で叩く固定ラッパー**（`~/.local/bin/tidd` に
+`uvx --from "<url>@<tag>#subdirectory=..." tidd "$@"` を exec するシェルスクリプトを
+配置する運用・`docs/setup/copier-workflow-adoption.md` §3.2）は spec のタグが静的に
+埋め込まれるため、配布タグを更新してもラッパーの `<tag>` は誰も更新しない。
+`check_uvx_wrapper_tag_sync()` はこのラッパーの spec タグと `.copier-answers.yml` の
+`_commit` を突き合わせ、不一致があれば通知メッセージを返す
+（`sync-global-tidd-entrypoints.py` hook・`tidd health-check` の両方から共有利用する）。
+
 Issue #3415: 配布テンプレート（rules・hooks）は copier タグで固定される一方、
 `@main` は常に main ブランチ最新の tidd_tools を取得するため、consumer では
 「CLI は新機能を持つのに rules が古い」という版ずれが生じる。`resolve_uvx_spec()` は
@@ -44,6 +53,10 @@ _HTTP_URL_RE = re.compile(
 _SSH_URL_RE = re.compile(
     r"^git@(?P<host>[^:]+):(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?$"
 )
+# uvx ラッパー内 spec の `@<tag>#subdirectory=` 部分（Issue #3768）。
+# spec URL 自体に `git@host` 形式の `@` が含まれうるため、`#subdirectory=` 直前の
+# `@` から始まる最短一致（tag に `@`・`#`・空白・`"` を含まない前提）で抽出する。
+_UVX_WRAPPER_TAG_RE = re.compile(r'@([^@#\s"]+)#subdirectory=')
 
 
 def _resolve_copier_ref(repo_root: Path) -> str:
@@ -151,3 +164,64 @@ def build_uvx_tidd_cmd(*args: str, repo_root: Path | None = None) -> list[str] |
             )
             return None
     return [uvx_bin, "--from", spec, "tidd", *args]
+
+
+def check_uvx_wrapper_tag_sync(
+    repo_root: Path | None = None, wrapper_path: Path | None = None
+) -> str | None:
+    """固定 uvx ラッパー（`~/.local/bin/tidd`）の spec タグと copier タグの同期を検証する（Issue #3768）.
+
+    Args:
+        repo_root: `.copier-answers.yml` を探す repo root（省略時はこのファイルの配置場所
+            `<repo_root>/.claude/hooks/_lib/tidd_uvx.py` から自動解決する）。
+        wrapper_path: ラッパースクリプトのパス（省略時は `~/.local/bin/tidd`。テスト用）。
+
+    Returns:
+        ラッパーの spec タグと `.copier-answers.yml` の `_commit` が異なる場合、両方の
+        タグ名を含む通知メッセージを返す。以下のいずれかに該当する場合は判定不能として
+        `None` を返す（silent skip）:
+
+        - ラッパーファイルが存在しない（uv tool の editable install のみの環境）
+        - ラッパーファイルの内容に `uvx` を含まない（uvx ラッパー方式でない）
+        - ラッパー内に `@<tag>#subdirectory=` パターンが見つからない
+        - `.copier-answers.yml` が存在しない、または `_commit` 行が見つからない
+        - 両者のタグが一致する
+    """
+    if repo_root is None:
+        repo_root = Path(__file__).resolve().parents[3]
+    if wrapper_path is None:
+        wrapper_path = Path.home() / ".local" / "bin" / "tidd"
+
+    if not wrapper_path.is_file():
+        return None
+    try:
+        wrapper_content = wrapper_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if "uvx" not in wrapper_content:
+        return None
+    wrapper_match = _UVX_WRAPPER_TAG_RE.search(wrapper_content)
+    if wrapper_match is None:
+        return None
+    wrapper_tag = wrapper_match.group(1)
+
+    answers_path = repo_root / ".copier-answers.yml"
+    if not answers_path.is_file():
+        return None
+    try:
+        answers_text = answers_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    answers_match = _COMMIT_LINE_RE.search(answers_text)
+    if answers_match is None:
+        return None
+    answers_tag = answers_match.group(1).strip()
+    if not answers_tag or answers_tag == wrapper_tag:
+        return None
+
+    return (
+        f"UVX_WRAPPER_TAG_MISMATCH: {wrapper_path} の uvx spec タグ（{wrapper_tag}）が"
+        f" .copier-answers.yml の _commit（{answers_tag}）と一致しません。"
+        f" ラッパー内の spec を `@{answers_tag}#subdirectory=` へ更新するか"
+        " `tidd copier-update` 実行後に手動で同期してください（#3768）。"
+    )

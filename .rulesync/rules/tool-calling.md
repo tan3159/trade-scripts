@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # Tool Calling 設計指針
 

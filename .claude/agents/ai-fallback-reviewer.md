@@ -13,7 +13,7 @@ false positive を抑制した高品質なレビューを返します。
 **CRITICAL: 起動条件は `tidd ai-review` が exit 3 を返した後に `issue-next` スキルが自動起動することのみ。Claude Code セッションから直接 Agent tool で起動することは絶対禁止。直接起動すると `ruff` / `pytest` / `gherkin-lint` などの lint/test ゲートが投稿されないままマージが通り、品質ゲートが完全にバイパスされる（Issue #1916）。**
 
 呼び出し元（`.claude/skills/issue-next/SKILL.md` の workflow.md line 162-176 節）は
-`mcp__github__get_pull_request_diff` / `mcp__github__get_pull_request` で取得した PR 差分・PR
+`gh pr diff <N>` / `gh pr view <N> --json body,title,files` で取得した PR 差分・PR
 ボディを prompt に含めて渡します。あなたはその context と Read/Grep/Glob で参照できる
 ローカルファイル（テスト・rules・docs）だけで判定します。
 

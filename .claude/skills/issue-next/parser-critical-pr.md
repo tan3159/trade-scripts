@@ -1,6 +1,6 @@
 # parser critical PR のレビューフロー（STEP 5 詳細）
 
-**なぜ special なのか:** `tidd ai-review` は exit 0 = 自動マージ完了のため、merge 前に secondary consensus を実行できない。`--stop-before-merge` フラグを使ってレビュー実行・本文保存まで行い、STEP 5.5 で secondary consensus を確保してから `--continue-with-verdict` でマージに進む（Issue #2645）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 **旧フロー（`/ai-review` SKILL を直接起動して手書きプロンプトを組み立てる）は廃止**（Issue #2645）。必ず `tidd ai-review --stop-before-merge` を使うこと。
 
@@ -17,8 +17,8 @@ exit 6 が返ったら → 以下の手順で実行する。
 
 **タイミング計測（Issue #2644・#3516）:** `step5-airview-start` / `step5-airview-end` は `tidd ai-review`（`--stop-before-merge` を含む）が backend レビュー実行前後に自己記録するため、手打ち mark は不要（#3553）。verdict の `started_at`/`ended_at` も本体が実測する。
 
-1. **STEP 1**: `mcp__github__get_pull_request` で PR 情報取得（parser critical フラグは確定済み。diff は取得しない・#3646）
-2. **STEP 2**: `tidd ai-review --stop-before-merge <PR番号>` を実行する
+1. **STEP 1**: `gh pr view` で PR 情報取得（parser critical フラグは確定済み。diff は取得しない・#3646）
+2. **STEP 2**: `uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge <PR番号>` を実行する
    - exit 10（APPROVE）: レビュー本文が `$AGENT_REVIEW_DIR/agent-review-<PR>.md`（未設定時 `/tmp/agent-review-<PR>.md`）に保存済み。STEP 3 へ進む
    - exit 11（REQUEST_CHANGES）: 直接 STEP 6 へ進む（`--continue-with-verdict REQUEST_CHANGES <PR番号>` を実行）
    - exit 3（全バックエンド利用不可）: STEP 5.5 が人間エスカレーションを発動（backend は claude-code 全滅相当として扱う）

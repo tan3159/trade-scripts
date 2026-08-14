@@ -23,12 +23,21 @@ worktree を切らずに main を直接編集すると `record-timing-boundaries
   - メインチェックアウトが `main` 以外のブランチに切り替わっている場合
   - git リポジトリ外・git コマンド失敗時（判定不能 → 許可・fail-open）
   - セッション CWD のリポジトリと異なるリポジトリのファイル編集（Issue #3717）
+  - リポジトリ管理外パス（セッション CWD の git toplevel 配下でない絶対パス）の編集
+    （例: WSL の `/mnt/c/Users/<user>/scripts/*.ps1`・Issue #3737）
 
 Issue #3717: 本 hook は「セッションを開いたリポジトリ」の worktree 強制を目的とする。
 Claude Code セッションが repo A で開かれている状態で repo B（別 git リポジトリ）の
 ファイルを編集する場合、repo A のルールを repo B の操作へ適用しない。
 対象ファイルのリポジトリがセッション CWD のリポジトリと異なる場合は対象外（許可）とする。
 同一リポジトリの別 worktree は「同じリポジトリ」として扱う（common git dir 一致判定）。
+
+Issue #3737: 編集対象ファイル自身がどの git リポジトリにも属さない（git toplevel 配下で
+ない絶対パス）場合も対象外（許可）とする。計測境界（step2-implementation /
+step2-branch-created）保護はリポジトリ内コードにのみ意味があり、OS 側運用スクリプト等の
+リポジトリ外ファイルには適用しない。ただし、パス上はセッション CWD のリポジトリ配下に
+位置する（例: 新規ディレクトリ配下への Write で git 探索が失敗する）場合は従来どおり
+worktree 強制を適用する。
 
 escape hatch: 環境変数 `SKIP_REQUIRE_WORKTREE_FOR_EDIT=1` でブロックを全スキップする。
 
@@ -120,6 +129,39 @@ def _resolve_start_dir(payload: dict, raw_path: str) -> str | None:
     return None
 
 
+def _resolve_abs_path(payload: dict, raw_path: str) -> str:
+    """Edit/Write payload の対象パスを絶対パスへ解決する（Issue #3737）.
+
+    相対パスは payload の cwd フィールドを基準に解決する（cwd がなければプロセス CWD）。
+    """
+    if os.path.isabs(raw_path):
+        return os.path.normpath(raw_path)
+    payload_cwd = payload.get("cwd")
+    if isinstance(payload_cwd, str) and payload_cwd:
+        base = payload_cwd
+    else:
+        base = os.getcwd()
+    return os.path.normpath(os.path.join(base, raw_path))
+
+
+def _is_under(path: str, root: str) -> bool:
+    """絶対パス ``path`` が ``root`` 配下（``root`` 自身も含む）かを返す（Issue #3737）.
+
+    シンボリックリンクは ``realpath`` で解決したうえで共通祖先を比較する。
+    判定不能（パスが空・相対等）は False（fail-open 側）。
+    """
+    try:
+        path_real = os.path.realpath(path)
+        root_real = os.path.realpath(root)
+    except OSError:
+        return False
+    try:
+        common = os.path.commonpath([path_real, root_real])
+    except ValueError:
+        return False
+    return common == root_real
+
+
 def _get_main_checkout(git_root: str) -> str | None:
     """`git worktree list --porcelain` の先頭 worktree（メインチェックアウト）パスを返す.
 
@@ -168,10 +210,19 @@ def _main() -> int:
 
     # Issue #2454 と同型: worktree 内のファイルを検査できるよう探索起点を解決する
     start_dir = _resolve_start_dir(payload, raw_path)
-    git_root = _git_toplevel(start_dir) or _git_toplevel()
-    if not git_root:
-        # git リポジトリ外・判定不能 → fail-open（許可）
-        return 0
+    git_root = _git_toplevel(start_dir)
+    if git_root is None:
+        # Issue #3737: 編集対象ファイル自身の git リポジトリが解決できない場合。
+        # リポジトリ外ファイル（例: WSL の /mnt/c/Users/<user>/scripts/*.ps1 のような
+        # OS 側運用スクリプト）への Edit/Write は本 hook（自リポジトリの worktree 強制）
+        # の対象外として許可する。
+        # ただし、パス上はセッション CWD のリポジトリ配下に位置する（例: 新規ディレクトリ
+        # 配下への Write で git 探索が失敗する）場合は従来どおり worktree 強制を適用する。
+        abs_path = _resolve_abs_path(payload, raw_path)
+        session_root = _git_toplevel()
+        if session_root is None or not _is_under(abs_path, session_root):
+            return 0  # git リポジトリ外・判定不能 → fail-open（許可）
+        git_root = session_root
 
     # Issue #3717: 対象ファイルのリポジトリがセッション CWD のリポジトリと異なる場合は
     # 本 hook（自リポジトリの worktree 強制）の対象外として許可する

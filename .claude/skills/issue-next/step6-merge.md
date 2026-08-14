@@ -1,6 +1,6 @@
 # STEP 6: 自動マージ（`/issue-next` 詳細フロー）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` の STEP 6 詳細フロー。AIレビュー APPROVE・CI 通過後に読む。
 
@@ -11,12 +11,12 @@ git fetch origin
 
 **`step6-merge-start`/`step6-merged` は手動 mark 不要（#3516）:** `tidd ai-review` の auto-merge 経路がマージ実行前後に統一日誌へ自己記録するため、手動 mark コマンドは廃止した。
 
-**マージ後に worktree をクリーンアップする。`mcp__github__get_pull_request({owner, repo, pull_number: <PR番号>})` で state フィールドが `MERGED` と機械確認できた場合のみ無確認で自動実行する（#2097）。worktree 内からは削除できないためメインリポジトリへ移動してから実行する。`MERGED` 以外（未マージ・conflict 等）の場合は以下のとおり分岐する:**
+**マージ後に worktree をクリーンアップする。`gh pr view <PR番号> --json state` で state フィールドが `MERGED` と機械確認できた場合のみ無確認で自動実行する（#2097）。worktree 内からは削除できないためメインリポジトリへ移動してから実行する。`MERGED` 以外（未マージ・conflict 等）の場合は以下のとおり分岐する:**
 **`is-unattended <N>` が exit 0 のとき（#2802 以降・#3633）:** AskUserQuestion を呼ばず `unattended-park-and-continue.md`「STEP 6: MERGED 未確認時の park-and-continue」を実行する（worktree・branch は削除せず残す。PR は close せず、次 Issue へ継続する）。
 **対話セッション（`--unattended` なし）時:** A/B の選択肢形式（`.claude/rules/escalation-format.md` 準拠）でユーザーに削除可否を確認し、A（削除する）と回答されるまで worktree・branch を削除しない。**
 
-```
-mcp__github__get_pull_request({owner, repo, pull_number: <PR番号>})  # state が "MERGED" であることを確認
+```bash
+gh pr view <PR番号> --json state  # state が "MERGED" であることを確認
 ```
 ```bash
 cd /path/to/<repo>
@@ -36,10 +36,10 @@ git pull origin main --ff-only
 
 チェックボックス判断の保守的基準（Issue やること全消化 gate 判定時と同じ）:
 
-1. `mcp__github__list_pull_request_files({owner, repo, pull_number: <PR番号>})` で PR の実際の変更ファイル一覧を取得する
-2. `mcp__github__get_issue({owner, repo, issue_number: N})` で Issue 本文を取得する
+1. `gh pr diff <PR番号> --name-only` で PR の実際の変更ファイル一覧を取得する
+2. `gh issue view <N> --json body` で Issue 本文を取得する
 3. 変更ファイルとの対応が確認できた `## やること` 項目のみ `[x]` に変更する
-4. `mcp__github__update_issue({owner, repo, issue_number: N, body: <更新後本文>})` で反映する
+4. `gh issue edit <N> --body-file <更新後本文ファイル>` で反映する
 
 マージ完了後:
 

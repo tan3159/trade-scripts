@@ -1,6 +1,6 @@
 # needs-human-merge PR resume フロー（引数なしモード事前チェック）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替え、`mcp__github__*` は Codex 側の GitHub MCP 設定が済んでいれば同ツール名のまま、未設定なら `gh` CLI で実行する。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `tidd resume-candidates` が PR 番号を stdout に出力した場合（候補あり）、新規 Issue 選定より先に本フローを実行する。
 
@@ -41,8 +41,8 @@ stdout に `#<数字>` が含まれる場合 → resume フローへ進む。
 
 ### 1. PR 情報の取得
 
-```
-mcp__github__get_pull_request({owner, repo, pull_number: <PR番号>})
+```bash
+gh pr view <PR番号> --json body,statusCheckRollup
 ```
 
 - `closes #N` を本文から抽出して関連 Issue 番号 N を特定する
@@ -50,8 +50,8 @@ mcp__github__get_pull_request({owner, repo, pull_number: <PR番号>})
 
 ### 2. Issue やること消化の証跡検証
 
-```
-mcp__github__get_issue({owner, repo, issue_number: N})
+```bash
+gh issue view N --json body
 ```
 
 Issue `## やること` の各チェックボックスを確認する:

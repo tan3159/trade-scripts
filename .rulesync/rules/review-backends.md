@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # レビューバックエンド規約
 

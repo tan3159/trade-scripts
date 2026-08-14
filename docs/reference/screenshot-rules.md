@@ -27,7 +27,7 @@ tidd screenshot-attach --latest
 ```bash
 tidd screenshot-attach --attach <MD_FILE>
 # 最新スクリーンショットを webp に変換して <MD_FILE> と同じディレクトリに配置し、
-# <MD_FILE> に ![スクリーンショット](./xxx.webp) を追記する
+# <MD_FILE> に スクリーンショット画像（webp 変換後）への参照を追記する
 ```
 
 特定のスクリーンショットを指定したい場合:
@@ -84,5 +84,5 @@ tidd screenshot-attach --screenshot-dir /path/to/screenshots --latest
 
 ## 参照
 
-- 実装: `tidd screenshot-attach`（`projects/py/tidd_tools/src/tidd_tools/screenshot_attach.py`。旧 `scripts/screenshot-attach.sh` を Issue #1057 で Python 化）
+- コマンド: `tidd screenshot-attach`（`tidd_tools` に同梱）
 - 環境変数: `SCREENSHOT_DIR`

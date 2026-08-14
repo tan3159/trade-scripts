@@ -1,5 +1,25 @@
 # CodeRabbit マージ後スクリーニング（use_coderabbit=true consumer限定・Issue #2340）
 
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+
+`use_coderabbit=true` の consumer では CodeRabbit の advisory レビュー（2〜5分）が
+`uv run --project projects/py/tidd_tools tidd ai-review` の auto-merge より遅れることがある。1 Issue 1 セッション運用ではマージ後に
+PR コメントを見返すトリガーがないため、遅着した妥当な指摘が放置されてしまう。マージを待たせず
+取りこぼしもなくすため、STEP 6（マージ完了・所要時間サマリ出力後）に本手順を実行する。
+
+## 目次
+
+- [実行条件](#実行条件)
+- [STEP A: CodeRabbit レビュー完了のポーリング（上限あり）](#step-a-coderabbit-レビュー完了のポーリング上限あり)
+- [STEP B: CodeRabbit 指摘の取得](#step-b-coderabbit-指摘の取得)
+- [STEP C: coderabbit-screening-reviewer subagent で分類](#step-c-coderabbit-screening-reviewer-subagent-で分類)
+- [STEP D: 妥当分の Issue 起票](#step-d-妥当分の-issue-起票)
+- [STEP E: 判定記録を計測用 Issue へ投稿](#step-e-判定記録を計測用-issue-へ投稿)
+
+---
+
+## 実行条件
+
 `tidd cleanup-merged-branch` の出力（stderr）に `coderabbit-screening: required` が含まれる
 場合のみ実行する。含まれない場合は本手順を完全にスキップする（CodeRabbit 未導入 consumer
 への影響ゼロ）。判定は cleanup-merged-branch がリポジトリルート直下の `.coderabbit.yaml`
@@ -60,13 +80,11 @@ subagent は各指摘を `妥当` / `誤検知` / `スコープ外` に分類し
 
 `classification == "妥当"` の指摘のみ、`.claude/rules/issue-creation.md` 準拠で起票する:
 
-```
-mcp__github__create_issue({
-  owner, repo,
-  title: "fix: <suggested_issue_title>",
-  body: "## 背景\n\nCodeRabbit マージ後スクリーニング（PR #<PR番号>）で妥当と判定された指摘:\n<reason>\n\n## やること\n\n- [ ] <suggested_issue_title> を修正する",
-  labels: ["type: fix", "priority: low", "source: rework"]
-})
+```bash
+gh issue create \
+  --title "fix: <suggested_issue_title>" \
+  --body "## 背景\n\nCodeRabbit マージ後スクリーニング（PR #<PR番号>）で妥当と判定された指摘:\n<reason>\n\n## やること\n\n- [ ] <suggested_issue_title> を修正する" \
+  --label "type: fix" --label "priority: low" --label "source: rework"
 ```
 
 起票した Issue 番号を控え、STEP E の判定記録に含める（起票が 0 件なら「なし」と記録する）。

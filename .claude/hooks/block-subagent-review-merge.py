@@ -20,6 +20,14 @@ issue-implementer / issue-fixer 等の subagent は PR 作成（または push�
 引数文字列（commit message・ファイルパス等）に `tidd ai-review` という文言が含まれる
 だけでは誤検知しない（実例: #3421 の commit message が誤ブロックされた）。
 
+**gh pr merge 検出は `_lib/gh_command.py` の `is_gh_pr_merge()` に委譲（Issue #3810）:**
+旧実装は `gh pr merge` を独自の正規表現でコマンド文字列全体に対して素朴サーチしており、
+`gh issue comment --body "...gh pr merge..."` のように、実行対象ではない箇所（コメント
+本文・grep のパターン引数等）のリテラルテキストにも誤爆していた（#3792 で
+`_lib/gh_command.py` 側に見つかったのと同種の欠陥）。`is_gh_pr_merge()` は heredoc 本文
+除去・シェルチェーン分割・`shlex.split` によるコマンドトークン列比較で「実際に実行される
+呼び出し」のみを判定するため、この誤爆を解消する。
+
 **許可リスト（Issue #3436）:** `/issue-next-all` が `/issue-next` を subagent として
 実行する多階層委譲では、issue-implementer の呼び出し元（issue-next エージェント）自身も
 `agent_type` が付与された subagent になる。issue-next（-all）エージェントはレビュー・
@@ -33,18 +41,15 @@ stdlib のみ使用。
 
 from __future__ import annotations
 
-import re
 import shlex
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib.gh_command import is_gh_pr_merge
 from _lib.hook_io import get_command, is_hook_enabled, read_hook_input
 
 DETAIL = "詳細: docs/reference/hooks.md#block-subagent-review-mergepy\n"
-
-# `gh pr merge`（グローバルフラグ挟み込みを許容）
-_PR_MERGE_RE = re.compile(r"\bgh(\s+-\S+)*\s+pr\s+merge\b")
 
 # issue-next（-all）自身は ai-review / gh pr merge の実行責務を持つ（#3436）。
 # Codex は task_name を snake_case（issue_next / issue_next_all）で渡すため、
@@ -106,7 +111,7 @@ def _main() -> int:
         sys.stderr.write(DETAIL)
         return 2
 
-    if _PR_MERGE_RE.search(command):
+    if is_gh_pr_merge(command):
         sys.stderr.write(
             f"BLOCK: 契約違反: subagent（{agent_type}）から gh pr merge を実行できません。\n"
             "マージ判断は親セッション（ai-review の exit code とマージ gate）の責務です。\n"

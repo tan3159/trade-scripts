@@ -14,6 +14,13 @@ Issue #2475: `projects/py/tidd_tools/pyproject.toml` の
 上記のいずれかが満たされない場合は silent early return（exit 0）する。
 consumer 環境等でグローバル tidd が存在しない場合も同様。
 
+Issue #3768: 上記の editable install 同期に加え、consumer が uvx ラッパー方式
+（`~/.local/bin/tidd` に固定 spec タグを埋め込んだシェルスクリプトを配置する運用・
+`docs/setup/copier-workflow-adoption.md` §3.2）を使っている場合、ラッパーの spec タグと
+`.copier-answers.yml` の `_commit` の不一致を検知して stderr に通知する
+（`_lib/tidd_uvx.py` の `check_uvx_wrapper_tag_sync()` に判定ロジックを委譲。
+このチェック自体はセッションをブロックしない・exit code に影響しない）。
+
 stdlib のみ使用。
 """
 
@@ -27,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.git_helpers import git_toplevel
 from _lib.hook_io import is_hook_enabled
+from _lib.tidd_uvx import check_uvx_wrapper_tag_sync
 
 # グローバル tidd tool の dist-info が置かれるディレクトリ
 _TOOL_ENV_ROOT = Path.home() / ".local" / "share" / "uv" / "tools" / "tidd-tools"
@@ -152,10 +160,26 @@ def _run_upgrade() -> int:
         return 1
 
 
+def _notify_uvx_wrapper_mismatch() -> None:
+    """uvx ラッパーの spec タグ不一致を検知したら stderr に通知する（Issue #3768）.
+
+    editable install の有無に関わらず（consumer 環境で最も必要になるため）実行する。
+    判定不能・一致していれば何も出力しない。exit code には影響させない。
+    """
+    root_str = git_toplevel(timeout=5)
+    if root_str is None:
+        return
+    message = check_uvx_wrapper_tag_sync(repo_root=Path(root_str))
+    if message is not None:
+        sys.stderr.write(message + "\n")
+
+
 def main() -> int:
     """メインエントリポイント."""
     if not is_hook_enabled("sync-global-tidd-entrypoints"):
         return 0
+
+    _notify_uvx_wrapper_mismatch()
 
     ep_txt_path = _find_global_entry_points_txt()
     if ep_txt_path is None:

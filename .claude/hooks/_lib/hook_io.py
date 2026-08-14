@@ -239,6 +239,21 @@ _SAFETY_HOOKS: frozenset[str] = frozenset(
     }
 )
 
+#: 破壊的操作防止（_SAFETY_HOOKS）とは別に、キー未設定時 default True（有効）として
+#: 扱う非安全系 hook の例外セット（Issue #3826）。
+#:
+#: `stamp-issue-next-session` は `require-issue-next-completion.py` の別セッション
+#: 誤ブロック対策（#3779）の前提となる session_id を記録する hook で、config.json に
+#: キーが存在しないと一度も動作しないため #3779 の機能が実質無効化されていた
+#: （実測: 2026-08-14）。この hook のみ既存の _SAFETY_HOOKS（破壊的操作の安全ガード）
+#: とは意味合いが異なるため、無効化時の「安全系 hook」WARN 対象には含めない
+#: （`is_safety` とは別に判定する）。
+_DEFAULT_ON_HOOKS: frozenset[str] = frozenset(
+    {
+        "stamp-issue-next-session",
+    }
+)
+
 
 def get_hooks_config_path() -> str:
     """OS ネイティブ config ディレクトリの config.json パスを返す（stdlib のみ）.
@@ -465,10 +480,13 @@ def is_hook_enabled(hook_name: str) -> bool:
 
     **Issue #2166 変更: opt-in 設計に反転。Issue #2354: 安全系 hook を 3→2 に縮小。**
     - 安全系 2 hook（_SAFETY_HOOKS）: 設定ファイルなし・キーなし → True（default ON）
-    - 非安全系 hook: 設定ファイルなし・キーなし → False（default OFF、no-op）
+    - **Issue #3826:** `_DEFAULT_ON_HOOKS`（`stamp-issue-next-session` 等）:
+      設定ファイルなし・キーなし → True（default ON）。安全系とは意味合いが異なるため
+      無効化時の「安全系 hook」WARN 対象には含めない。
+    - それ以外の非安全系 hook: 設定ファイルなし・キーなし → False（default OFF、no-op）
 
-    不正 JSON の場合は stderr に WARN を出し、安全系は True、非安全系は False を返す。
-    安全系 hook が明示的に無効化されている場合は追加で WARN を出す。
+    不正 JSON の場合は stderr に WARN を出し、_SAFETY_HOOKS・_DEFAULT_ON_HOOKS は True、
+    それ以外は False を返す。安全系 hook が明示的に無効化されている場合は追加で WARN を出す。
 
     **Issue #3569:** プロセス CWD から探索したリポジトリ root の ``.tidd/config.json``
     にキーがあれば、マシン設定より優先して使う（優先順位: リポジトリ > マシン >
@@ -498,13 +516,15 @@ def is_hook_enabled(hook_name: str) -> bool:
         return repo_value
 
     is_safety = hook_name in _SAFETY_HOOKS
+    # Issue #3826: 破壊的操作の安全ガード（_SAFETY_HOOKS）とは別に default ON にする例外
+    is_default_on = is_safety or hook_name in _DEFAULT_ON_HOOKS
     config_path = get_hooks_config_path()
     try:
         with open(config_path, encoding="utf-8") as f:
             raw = f.read()
     except (OSError, FileNotFoundError):
-        # 設定ファイルが存在しない → 安全系は True、非安全系は False
-        return is_safety
+        # 設定ファイルが存在しない → default ON 対象は True、それ以外は False
+        return is_default_on
 
     try:
         config = json.loads(raw)
@@ -512,15 +532,15 @@ def is_hook_enabled(hook_name: str) -> bool:
         sys.stderr.write(
             "WARN: config.json のパースに失敗しました（不正な JSON）。hook を有効として扱います。\n"
         )
-        return is_safety
+        return is_default_on
 
     if not isinstance(config, dict):
-        return is_safety
+        return is_default_on
 
     value = config.get(hook_name)
     if value is None:
-        # キーが存在しない → 安全系は True、非安全系は False
-        return is_safety
+        # キーが存在しない → default ON 対象は True、それ以外は False
+        return is_default_on
 
     enabled = bool(value)
     if not enabled:
