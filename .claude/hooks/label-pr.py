@@ -35,6 +35,15 @@
     `POST/DELETE /repos/{owner}/{repo}/issues/{n}/labels` に置き換えた（repo スコープのみで動作）。
     owner/repo は cwd の git remote ではなく PR 自身の `gh pr view --json headRepository` から解決する。
 
+**Issue #3800 で失敗履歴を追記専用 JSONL 化:**
+  - `~/.cache/label-pr/last-run.json`（Issue #1445）は直近 1 回分の状態を上書きするため、
+    失敗した実行の直後に別 PR 作成が成功すると、過去の失敗詳細（reason/failure_details）が
+    失われ、nightly の label-pr-slo が SLO 違反を検知しても事後調査ができない
+    （#3800 で実際に発生: 20 merged PR 中 7 件がラベル欠落したが原因を追えなかった）。
+  - 失敗（`status == "failed"`）時のみ `~/.cache/label-pr/failures.jsonl` に追記する。
+    last-run.json のスキーマ・既存の呼び出し元は変更しない（`_write_last_run` 内部で
+    条件付きに追記するのみ）。
+
 hook 失敗原則（`docs/reference/hooks.md` §失敗原則 参照）:
   - **stderr にログ + exit 2 を必ず返す**
   - **silent success（常時 exit 0）は禁止**
@@ -326,11 +335,40 @@ def _last_run_path() -> Path:
     return base / "label-pr" / "last-run.json"
 
 
+def _failure_log_path() -> Path:
+    """失敗履歴 JSONL（追記専用）のパスを解決する (Issue #3800).
+
+    ``_last_run_path()`` は直近 1 回分の状態を上書きするため、次回実行が成功すると
+    過去の失敗詳細（reason/failure_details）が失われ、nightly の label-pr-slo が
+    SLO 違反を検知しても個別実行の失敗原因を事後調査できない問題が #3800 で
+    実際に発生した。失敗（``status == "failed"``）時のみ本ファイルに追記する。
+    """
+    return _last_run_path().parent / "failures.jsonl"
+
+
+def _append_failure_log(record: dict[str, Any]) -> None:
+    """失敗レコードを追記専用 JSONL に追記する (Issue #3800).
+
+    書き込み失敗（disk full 等）は hook 全体をブロックしないよう silently 握り潰す
+    （``_write_last_run`` と同じ fail-safe 方針）。
+    """
+    path = _failure_log_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
+            f.write("\n")
+    except OSError as exc:
+        sys.stderr.write(f"label-pr.py: WARN: failures.jsonl 書き込みに失敗: {exc}\n")
+
+
 def _write_last_run(record: dict[str, Any]) -> None:
     """発火履歴 JSON を書き込む (Issue #1445).
 
     hook 経路そのものが欠落した状態を後から検知するための audit ログ。
     書き込み失敗（disk full 等）は hook 全体をブロックしないよう silently 握り潰す。
+    失敗（``status == "failed"``）時は ``_append_failure_log`` で追記専用 JSONL にも
+    記録し、直近の成功実行によって過去の失敗詳細が失われないようにする (Issue #3800)。
     """
     record.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     path = _last_run_path()
@@ -342,6 +380,9 @@ def _write_last_run(record: dict[str, Any]) -> None:
         )
     except OSError as exc:
         sys.stderr.write(f"label-pr.py: WARN: last-run.json 書き込みに失敗: {exc}\n")
+
+    if record.get("status") == "failed":
+        _append_failure_log(record)
 
 
 def _add_label(owner_repo: str, pr_number: str, label: str) -> tuple[bool, str]:

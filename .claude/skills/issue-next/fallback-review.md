@@ -1,5 +1,11 @@
 # agy クォータ上限時の Claude フォールバック（STEP 5 詳細）
 
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+
+`/issue-next` の STEP 5 詳細フロー。`uv run --project projects/py/tidd_tools tidd ai-review` が **exit code 3** を返した場合のみ読む。
+
+**CRITICAL: exit code 3 のみが対象。exit 1（REQUEST_CHANGES）や exit 2（エスカレーション）では絶対に起動しない。**
+
 > **起動は hook で機械強制されています（#3629）:** exit 3 の際に
 > `~/.cache/tidd/ai-reviewer/pr-<N>/backend-unavailable` 証跡フラグが作成され、
 > PreToolUse hook（`.claude/hooks/block-unauthorized-fallback-review.py`）がフラグの有無で
@@ -38,7 +44,7 @@ exit 2 = スマートガードレール発動（最大試行回数超過・同�
 Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="ai_fallback_reviewer", task_name="ai_fallback_reviewer", message=...) に読み替え
   subagent_type="ai-fallback-reviewer",
   description="PR #<PR番号> のフォールバックレビュー",
-  prompt="PR番号: <PR番号>\n<mcp__github__get_pull_request の PR 本文> と <mcp__github__get_pull_request_diff の diff>"
+  prompt="PR番号: <PR番号>\n<gh pr view <PR番号> --json body の PR 本文> と <gh pr diff <PR番号> の diff>"
 )
 ```
 

@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # 判断ジャーナル規約
 

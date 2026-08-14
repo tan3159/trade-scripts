@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # テストフレームワーク棲み分けルール
 

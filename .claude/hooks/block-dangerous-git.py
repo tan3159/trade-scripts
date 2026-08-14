@@ -15,6 +15,7 @@ stdlib のみ使用。
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.gh_cache import get_pr_by_branch as _get_pr_by_branch_cached
 from _lib.git_helpers import run_git as _run_git
-from _lib.hook_io import get_command, is_hook_enabled, read_hook_input
+from _lib.hook_io import get_command, get_hook_config, is_hook_enabled, read_hook_input
 from _lib.shell_parse import split_shell_fragments as _split_shell_fragments
 from _lib.shell_parse import strip_heredoc_bodies as _strip_heredoc_bodies
 
@@ -96,6 +97,7 @@ _BRANCH_DELETE_FORCE_RE = re.compile(
     r"|\s--delete\b.*\s--force\b"
     r"|\s--force\b.*\s--delete\b)"
 )
+_WORKTREE_REMOVE_RE = re.compile(r"\bgit(\s+-\S+)*\s+worktree\s+remove\b")
 _COMMAND_CHAIN_RE = re.compile(r"(;|&&|\|\|)")
 # -D を含むトークンを検出し、それ以降のトークン列を返すための正規表現
 _DASH_D_TOKEN_RE = re.compile(r"-[a-zA-Z]*D[a-zA-Z]*")
@@ -262,6 +264,20 @@ def _main() -> int:
             "BLOCK: 危険なgit操作: git clean -f\n"
             "git 管理外のファイルをすべて削除します（元に戻せません）。\n"
             "削除対象を事前確認するには: git clean -n\n"
+        )
+        sys.stderr.write(DETAIL)
+        return 2
+
+    # git worktree remove（Issue #3764: opt-in。PR を持たない worktree の escape hatch 付き）
+    if (
+        get_hook_config("block-worktree-remove", default=False) is True
+        and _WORKTREE_REMOVE_RE.search(safe)
+        and os.environ.get("TIDD_ALLOW_WORKTREE_REMOVE") != "1"
+    ):
+        sys.stderr.write(
+            "BLOCK: 危険なgit操作: git worktree remove\n"
+            "マージ済みブランチの後処理には tidd cleanup-merged-branch <branch> を使用してください。\n"
+            "PR を持たない worktree を削除する場合のみ TIDD_ALLOW_WORKTREE_REMOVE=1 を設定して再実行してください。\n"
         )
         sys.stderr.write(DETAIL)
         return 2

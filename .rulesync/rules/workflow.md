@@ -1,7 +1,7 @@
 ---
 root: false
 targets:
-  - '*'
+  - 'claudecode'
 ---
 # ワークフロー規約
 
@@ -19,7 +19,7 @@ targets:
 
 ## GitHub 操作の使い分け
 
-Claude Code セッション内: **`mcp__github__*`** / tidd_tools・CI・cron: `gh`（詳細: `docs/research/github-mcp-server.md`）
+Claude Code セッション内・tidd_tools・CI・cron すべて `gh`（`mcp__github__*` 廃止）。
 
 ### consumer が持つ 2 種類の PAT
 

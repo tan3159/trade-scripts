@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Timing 境界の機械記録 hook（Issue #3160・断絶修正 #3385・#3518・#3558）.
+"""Timing 境界の機械記録 hook（Issue #3160・断絶修正 #3385・#3518・#3558・#3816）.
 
 merge-summary が読む計測境界のうち、SKILL.md / agent のプロンプト指示のみに依存して
 いたマークを、既存の tool 呼び出し発火点から自動記録する:
@@ -16,20 +16,44 @@ merge-summary が読む計測境界のうち、SKILL.md / agent のプロンプ�
 - PostToolUse[Bash] ``git worktree add`` / ``tidd worktree-add`` 成功 → ``step2-branch-created``
 - PostToolUse[mcp__github__create_pull_request] または PostToolUse[Bash]
   ``gh pr create`` 成功 → ``step4-pr-created``
-- PostToolUse[mcp__github__issue_write] で ``🙋 needs-human-input`` ラベルを含む
-  update 成功 → ``step1.5-quality-check``（``meta.verdict="needs-human-input"``・#3635）
-- PostToolUse[mcp__github__sub_issue_write] で ``method == "add"``（サブ Issue 追加）
-  成功 → ``step1.5-quality-check``（``meta.verdict="epic-split"``・#3635）
+- Stop（``_handle_stop``・#3816）: 上記 PostToolUse 経路が発火しない Codex CLI
+  セッション向けの補完記録。現在アクティブな Issue（issue-next-state）に対応する
+  PR の存在を ``gh pr list --search`` で確認し、見つかれば ``step4-pr-created`` を記録する
+- PostToolUse[Bash] ``gh issue edit`` で ``🙋 needs-human-input`` ラベルを ``--add-label``
+  指定して成功 → ``step1.5-quality-check``（``meta.verdict="needs-human-input"``・#3817）
+- PostToolUse[Bash] ``gh issue create --parent <N>`` 成功（Issue URL を stdout へ出力）
+  → 親 Issue ``issue-<N>`` に ``step1.5-quality-check``
+  （``meta.verdict="epic-split"``・#3817）
 
-**#3635:** STEP 1.5-d の needs-human-input（park）・epic-split（Epic 化）分岐は
+**#3816:** Codex CLI は PostToolUse hook が全面無効（``.rulesync/hooks.jsonc`` の
+``codexcli.hooks.postToolUse: []`` override・#3223）のため、``gh pr create`` 成功を
+PostToolUse[Bash] から検知できない。PreToolUse[Bash] はコマンド実行前で成功可否を
+判定できないため（stdout の PR URL が存在しない）楽観的記録は「失敗時は記録しない」
+要件を満たせず不採用。Stop hook（#3223 の対象外・Codex でも有効）から
+``resolve_current_issue()``（issue-next-state.json）で現在アクティブな Issue を特定し、
+``gh pr list --search "closes #<N> in:body"`` で PR の実在を確認したうえで記録する
+（``_handle_stop``）。Claude Code でも同じ経路が動くが、通常は PostToolUse で
+既に記録済みのため冪等性チェックで即 return 0 になり無害。
+
+**#3635/#3817:** STEP 1.5-d の needs-human-input（park）・epic-split（Epic 化）分岐は
 issue-implementer を起動せずフローが終わるため、従来は SKILL.md のプロンプト指示で
 手動 ``mark-quality-check-done --verdict needs-human-input|epic-split`` を実行していた
-（#3159 で機械強制のスコープ外・呼び忘れてもブロックされなかった）。本 hook が
+（#3159 で機械強制のスコープ外・呼び忘れてもブロックされなかった）。#3635 では
 ``mcp__github__issue_write``（ラベル付与）・``mcp__github__sub_issue_write``
-（サブ Issue 追加）の PostToolUse から自動記録することで、計測境界クローズ漏れを
-機械強制する。記録は ``_record()`` 経由のため、既に ``step1.5-quality-check`` が
-記録済み（PASS/FAIL の issue-reviewer 経路や手動マークを含む）の Issue には二重記録しない。
-成功判定は ``_handle_pr_create()`` と同じ流儀（``interrupted`` / ``isError``）。
+（サブ Issue 追加）の PostToolUse から自動記録するようにしたが、GitHub 操作の
+``gh`` 一本化改訂（#3773）・``.mcp.json`` 配布停止（#3772）・matcher エントリ削除
+（#3783/#3820）によりこれらの MCP tool は到達不能になり、記録が一切発生しなくなって
+いた（#3817）。本 hook は PostToolUse[Bash] の ``gh issue edit --add-label``
+（ラベル付与）・``gh issue create --parent``（サブ Issue 追加）から自動記録することで、
+計測境界クローズ漏れを機械強制する。記録は ``_record()`` 経由のため、既に
+``step1.5-quality-check`` が記録済み（PASS/FAIL の issue-reviewer 経路や手動マークを
+含む）の Issue には二重記録しない。成功判定は ``_handle_gh_pr_create()`` と同じ流儀
+（``interrupted`` + stdout の URL 有無）。#3635 で追加された mcp 専用ハンドラ
+（``_handle_issue_write()``/``_handle_sub_issue_write()``）は、settings.json の
+matcher エントリ自体が既に削除済みで到達不能なため #3817 で撤去した
+（後方互換として残す選択肢も検討したが、GitHub MCP 廃止決定
+`docs/decisions/2026-08-14-abolish-github-mcp.md` により MCP 復活の予定はなく、
+呼び出し不能なコードを残す保守コストに見合わないため削除を選んだ）。
 
 **#3558:** ``ai-confirm-verifier`` / ``issue-fixer`` の prompt は ``PR番号: <PR番号>``
 （Issue 番号を含まない）のため、``_lib.gh_command.gh_pr_view_json(pr_num, ["body"])``
@@ -107,10 +131,24 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.gh_command import extract_closes_issues as _extract_closes_issues
+from _lib.gh_command import (
+    extract_gh_issue_create_parent as _extract_gh_issue_create_parent,
+)
+from _lib.gh_command import (
+    extract_gh_issue_edit_numbers as _extract_gh_issue_edit_numbers,
+)
+from _lib.gh_command import (
+    extract_issue_number_from_url as _extract_issue_number_from_url,
+)
 from _lib.gh_command import extract_pr_body as _extract_pr_body
 from _lib.gh_command import extract_pr_number_from_url as _extract_pr_number_from_url
+from _lib.gh_command import gh_issue_edit_added_label as _gh_issue_edit_added_label
 from _lib.gh_command import gh_pr_view_json as _gh_pr_view_json
+from _lib.gh_command import is_gh_issue_create as _is_gh_issue_create
+from _lib.gh_command import is_gh_issue_edit as _is_gh_issue_edit
 from _lib.gh_command import is_gh_pr_create as _is_gh_pr_create
+from _lib.git_helpers import git_toplevel as _git_toplevel
+from _lib.git_helpers import run_gh as _run_gh
 from _lib.hook_io import (
     append_timing_event,
     get_command,
@@ -140,6 +178,7 @@ from _lib.issue_ref import (
 from _lib.issue_ref import (
     extract_pr_number_from_prompt as _extract_pr_number_from_prompt,
 )
+from _lib.stop_orphan_state import resolve_current_issue as _resolve_current_issue
 
 # 捕捉する subagent 種別（`-` を `_` に正規化した値）→ {start, end?, source}（#3557・#3558）。
 # - ``start``: PreToolUse[Agent]（subagent 起動）時に記録する step
@@ -172,8 +211,8 @@ _WORKTREE_ADD_CMD_RE = re.compile(r"git\s+worktree\s+add\b|tidd\s+worktree-add\b
 #: ``gh pr view <N> --json createdAt`` のタイムアウト（#3552）。
 _GH_PR_VIEW_TIMEOUT_SECONDS = 10.0
 
-#: ``mcp__github__issue_write`` の ``labels`` に含まれると品質チェック修正不能（park）を
-#: 意味するラベル名（#3635）。validate-issue.py の ``NEEDS_HUMAN_INPUT_LABEL`` と同一。
+#: ``gh issue edit --add-label`` に指定されると品質チェック修正不能（park）を意味する
+#: ラベル名（#3635・#3817）。validate-issue.py の ``NEEDS_HUMAN_INPUT_LABEL`` と同一。
 _NEEDS_HUMAN_INPUT_LABEL = "🙋 needs-human-input"
 
 
@@ -356,8 +395,66 @@ def _handle_gh_pr_create(command: str, payload: dict[str, Any]) -> int:
     )
 
 
+def _handle_gh_issue_edit_needs_human_input(command: str) -> int:
+    """``gh issue edit <N> --add-label "🙋 needs-human-input"`` 成功 → step1.5-quality-check（#3817）.
+
+    STEP 1.5-d の「修正不能・判断不能（park）」分岐は issue-implementer を起動せず
+    フローが終わるため、従来は SKILL.md のプロンプト指示で手動
+    ``mark-quality-check-done --verdict needs-human-input`` を実行していた
+    （#3159 で機械強制のスコープ外）。本 hook が ``gh issue edit`` の ``--add-label``
+    に ``🙋 needs-human-input`` を含む呼び出しを検知して自動記録する
+    （``_lib.gh_command.gh_issue_edit_added_label()``）。対象 Issue 番号は
+    ``gh issue edit`` の位置引数（``extract_gh_issue_edit_numbers()``）から解決する。
+    """
+    if not _gh_issue_edit_added_label(command, _NEEDS_HUMAN_INPUT_LABEL):
+        return 0
+    numbers = _extract_gh_issue_edit_numbers(command)
+    if not numbers:
+        return 0
+    return _record(
+        numbers[0],
+        "step1.5-quality-check",
+        "record-timing-boundaries",
+        meta={"verdict": "needs-human-input"},
+    )
+
+
+def _handle_gh_issue_create_sub_issue(command: str, payload: dict[str, Any]) -> int:
+    """``gh issue create --parent <N>`` 成功 → 親 Issue に step1.5-quality-check（#3817）.
+
+    STEP 1.5-d の「粒度が大きすぎる（Epic 化）」分岐も issue-implementer を起動せず
+    フローが終わるため、従来は手動 ``mark-quality-check-done --verdict epic-split`` を
+    実行していた。本 hook が ``gh issue create --parent <N>``（親 Issue 番号を指定した
+    サブ Issue 追加）を検知して、親 Issue 番号へ自動記録する。成功判定は
+    ``_handle_gh_pr_create()`` と同じ流儀（stdout の Issue URL の有無で判定・
+    ``_lib.gh_command.ISSUE_URL_RE``）。
+    """
+    parent = _extract_gh_issue_create_parent(command)
+    if parent is None:
+        return 0
+    stdout = _get_tool_output(payload)
+    issue_num = _extract_issue_number_from_url(stdout)
+    if issue_num is None:
+        # 成功時に stdout へ Issue URL が出力される。無い = 失敗した gh issue create
+        return 0
+    return _record(
+        parent,
+        "step1.5-quality-check",
+        "record-timing-boundaries",
+        meta={"verdict": "epic-split"},
+    )
+
+
 def _handle_bash(payload: dict[str, Any]) -> int:
-    """PostToolUse[Bash]: worktree 作成成功 → step2-branch-created / gh pr create 成功 → step4-pr-created."""
+    """PostToolUse[Bash]: worktree 作成 / gh pr create / gh issue edit・create の各成功を記録する.
+
+    - ``git worktree add`` / ``tidd worktree-add`` 成功 → ``step2-branch-created``
+    - ``gh pr create`` 成功 → ``step4-pr-created``
+    - ``gh issue edit --add-label "🙋 needs-human-input"`` 成功 →
+      ``step1.5-quality-check``（``meta.verdict="needs-human-input"``・#3817）
+    - ``gh issue create --parent <N>`` 成功 → 親 Issue に ``step1.5-quality-check``
+      （``meta.verdict="epic-split"``・#3817）
+    """
     tool_response = payload.get("tool_response") or {}
     if not isinstance(tool_response, dict):
         return 0
@@ -373,6 +470,10 @@ def _handle_bash(payload: dict[str, Any]) -> int:
             )
     if _is_gh_pr_create(command):
         return _handle_gh_pr_create(command, payload)
+    if _is_gh_issue_edit(command):
+        return _handle_gh_issue_edit_needs_human_input(command)
+    if _is_gh_issue_create(command):
+        return _handle_gh_issue_create_sub_issue(command, payload)
     return 0
 
 
@@ -393,88 +494,87 @@ def _handle_pr_create(payload: dict[str, Any]) -> int:
     return _record(issues[0], "step4-pr-created", "record-timing-boundaries")
 
 
-def _tool_input_int(payload: dict[str, Any], key: str) -> int | None:
-    """tool_input から整数値（``issue_number`` 等）を取り出す（#3635）."""
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return None
-    value = tool_input.get(key)
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+#: ``gh pr list --search`` のタイムアウト（#3816）。
+_GH_PR_LIST_TIMEOUT_SECONDS = 8.0
 
 
-def _handle_issue_write(payload: dict[str, Any]) -> int:
-    """PostToolUse[mcp__github__issue_write]: `🙋 needs-human-input` ラベル付与 → step1.5-quality-check（#3635）.
+def _is_stop_payload(payload: dict[str, Any]) -> bool:
+    """payload が Stop hook のものか判定する（#3816）.
 
-    STEP 1.5-d の「修正不能・判断不能（park）」分岐は issue-implementer を起動せず
-    フローが終わるため、従来は SKILL.md のプロンプト指示で手動
-    ``mark-quality-check-done --verdict needs-human-input`` を実行していた
-    （#3159 で機械強制のスコープ外）。本 hook が ``mcp__github__issue_write`` の
-    ``labels`` に ``🙋 needs-human-input`` を含む update を検知して自動記録する。
-    成功判定は ``_handle_pr_create()`` と同じ流儀（``interrupted`` / ``isError``）。
+    Stop payload には ``tool_name`` が無く（PreToolUse/PostToolUse/Agent 系と
+    排他）、``stop_hook_active``（`_lib/schemas/Stop.json` 必須ではないが
+    Claude Code の実 payload に含まれるフィールド）を持つ。``hook_event_name``
+    が ``"Stop"`` の場合も同様に扱う（後方互換・将来の payload 拡張に備える）。
     """
-    tool_response = payload.get("tool_response") or {}
-    if isinstance(tool_response, dict):
-        if tool_response.get("interrupted") is True:
-            return 0
-        if tool_response.get("isError") is True:
-            return 0
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
-        return 0
-    if str(tool_input.get("method") or "") != "update":
-        return 0
-    labels = tool_input.get("labels")
-    if not isinstance(labels, list) or _NEEDS_HUMAN_INPUT_LABEL not in labels:
-        return 0
-    issue_num = _tool_input_int(payload, "issue_number")
+    if "tool_name" in payload:
+        return False
+    return "stop_hook_active" in payload or payload.get("hook_event_name") == "Stop"
+
+
+def _handle_stop(payload: dict[str, Any]) -> int:
+    """Stop: Codex で PostToolUse が発火しない環境向け step4-pr-created 補完記録（#3816）.
+
+    Codex CLI は PostToolUse hook が全面無効（#3223）のため、``gh pr create`` の
+    Bash 呼び出しに対する PostToolUse[Bash] 経路で ``step4-pr-created`` を記録できない。
+    PreToolUse[Bash] はコマンド実行前で stdout（PR URL）が存在せず成功可否を判定
+    できないため、楽観的記録は「失敗時に記録しない」要件（Scenario 2）を満たせず
+    採用できない。
+
+    本関数は Stop hook（Codex でも無効化されていない・#3223 の対象外）から、
+    現在アクティブな Issue（``resolve_current_issue()`` が
+    ``cache/issue-next-state/issue-<N>.json`` の ``current_issue`` を返す）に
+    対応する PR の存在を ``gh pr list --search "closes #<N> in:body"`` で確認し、
+    見つかれば実 createdAt で記録する。Claude Code でも同じ経路が動くが、通常は
+    PostToolUse で既に記録済みのため ``_has_step`` の冪等性チェックで即 return 0
+    になり無害（#3518 と同様「記録者を実行主体側へ移す」設計方針の踏襲）。
+
+    ``step2-branch-created`` が未記録の Issue（worktree 作成前・無関係な会話）では
+    無駄な ``gh`` 呼び出しを避けるため早期 return する。``gh`` 実行失敗・PR 未検出
+    時は記録せず exit 0 で終了する（Stop hook はセッション終了をブロックしない）。
+    """
+    repo_root = _git_toplevel()
+    issue_num = _resolve_current_issue(repo_root)
     if issue_num is None:
         return 0
-    return _record(
-        issue_num,
-        "step1.5-quality-check",
-        "record-timing-boundaries",
-        meta={"verdict": "needs-human-input"},
+    if _has_step(issue_num, "step4-pr-created"):
+        return 0
+    if not _has_step(issue_num, "step2-branch-created"):
+        return 0
+    rc, out = _run_gh(
+        "pr",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        f"closes #{issue_num} in:body",
+        "--json",
+        "number,createdAt",
+        timeout=_GH_PR_LIST_TIMEOUT_SECONDS,
     )
-
-
-def _handle_sub_issue_write(payload: dict[str, Any]) -> int:
-    """PostToolUse[mcp__github__sub_issue_write]: サブ Issue 追加 → step1.5-quality-check（#3635）.
-
-    STEP 1.5-d の「粒度が大きすぎる（Epic 化）」分岐も issue-implementer を起動せず
-    フローが終わるため、従来は手動 ``mark-quality-check-done --verdict epic-split`` を
-    実行していた。本 hook が ``mcp__github__sub_issue_write`` の ``method == "add"``
-    （親 Issue へサブ Issue 追加）を検知して、親 Issue 番号（``issue_number``）へ
-    自動記録する。成功判定は ``_handle_pr_create()`` と同じ流儀。
-    """
-    tool_response = payload.get("tool_response") or {}
-    if isinstance(tool_response, dict):
-        if tool_response.get("interrupted") is True:
-            return 0
-        if tool_response.get("isError") is True:
-            return 0
-    tool_input = payload.get("tool_input") or {}
-    if not isinstance(tool_input, dict):
+    if rc != 0:
         return 0
-    if str(tool_input.get("method") or "") != "add":
+    try:
+        prs = json.loads(out or "[]")
+    except json.JSONDecodeError:
         return 0
-    issue_num = _tool_input_int(payload, "issue_number")
-    if issue_num is None:
+    if not isinstance(prs, list) or not prs:
+        return 0
+    first = prs[0]
+    created_at = first.get("createdAt") if isinstance(first, dict) else None
+    if not isinstance(created_at, str) or not created_at:
         return 0
     return _record(
         issue_num,
-        "step1.5-quality-check",
+        "step4-pr-created",
         "record-timing-boundaries",
-        meta={"verdict": "epic-split"},
+        meta={"created_at": created_at, "created_at_source": "github"},
     )
 
 
 def _main() -> int:
     payload = read_hook_input(hook_name=None)
+    if _is_stop_payload(payload):
+        return _handle_stop(payload)
     tool_name = get_tool_name(payload)
     if tool_name in ("Agent", "spawn_agent"):
         # settings.json は PreToolUse[Agent] と PostToolUse[Agent] の両方から本 hook を
@@ -487,10 +587,6 @@ def _main() -> int:
         return _handle_bash(payload)
     if tool_name == "mcp__github__create_pull_request":
         return _handle_pr_create(payload)
-    if tool_name == "mcp__github__issue_write":
-        return _handle_issue_write(payload)
-    if tool_name == "mcp__github__sub_issue_write":
-        return _handle_sub_issue_write(payload)
     return 0
 
 
