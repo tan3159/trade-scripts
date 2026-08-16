@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -157,6 +158,39 @@ def _filter_git_segments(command_for_check: str) -> str:
     return " ".join(git_segments)
 
 
+def _is_amend_invocation(command_for_check: str) -> bool:
+    """`git commit ... --amend` を独立トークンとしてのみ判定する（Issue #3955）.
+
+    従来は heredoc 本文除去・セグメント分割を経ない生の `command` 文字列へ
+    正規表現 `(?:^|&&|\\||;|\\n)\\s*git\\s+commit\\b[^&|;<(\\n]*\\s--amend\\b` を
+    照合していたため、コミットメッセージ本文（`-m` の値）・heredoc 本文・
+    `gh issue create --body` の値の中に改行を挟んで該当コマンド名が現れるだけで
+    誤ブロックしていた。
+
+    引用符の対応関係は正規表現では原理的に扱えないため、`split_shell_fragments`
+    でシェル演算子（`&&` `||` `|` `;` 改行）ごとにセグメント分割した上で、各
+    セグメントを `shlex.split` でトークン化して判定する。引用符内のテキストは
+    1 つの token に丸ごと吸収されるため、`commit`/`--amend` がそれぞれ独立した
+    token として現れない限りマッチしない。
+
+    呼び出し元は heredoc 本文を `_strip_heredoc_bodies` で除去済みの文字列を
+    渡すこと（heredoc 本文中のテキストを誤って token 判定しないため）。
+    """
+    for frag in _split_shell_fragments(command_for_check):
+        try:
+            tokens = shlex.split(frag)
+        except ValueError:
+            # 引用符が閉じていない等で shlex が解釈できない場合は、真の
+            # --amend を取りこぼさないよう保守的に空白区切りへフォールバック
+            # する（fail-closed）。
+            tokens = frag.split()
+        if len(tokens) < 2 or tokens[0] != "git":
+            continue
+        if "commit" in tokens and "--amend" in tokens:
+            return True
+    return False
+
+
 def _check_branch_delete_safe(normalized: str) -> bool:
     """git branch -D が安全に許可できる条件を判定する.
 
@@ -239,7 +273,7 @@ def _main() -> int:
         return 0
 
     # heredoc 本文を除去した判定用コピーを作成する（Issue #2576）。
-    # 元の command は変更しない（git commit --amend チェックが元コマンドを参照するため）。
+    # 元の command は変更しない（get_command 呼び出し元がそのまま参照する可能性があるため）。
     command_for_check = _strip_heredoc_bodies(command)
     # `_check_branch_delete_safe` はコマンド全体の連結・cd prefix を自前で判定するため
     # フィルタ前の全体正規化文字列を必要とする（従来通り）。
@@ -312,15 +346,12 @@ def _main() -> int:
         sys.stderr.write(DETAIL)
         return 2
 
-    # git commit --amend（Issue #1285: TDD 順序改竄防止・Issue #1352 で誤検知修正）
-    # コマンド先頭・シェルセパレータ直後・改行後の `git commit ... --amend` のみをブロックする。
-    # `[^&|;<(\n]` で shell separator / heredoc(<<) / subshell($()) / 改行の境界も除外する。
-    # 改行を保持するため normalized ではなく元の command を検査する。
-    # 引用符 (") と (') はそのまま残る（heredoc/subshell 判定に必要）。
-    if re.search(
-        r"(?:^|&&|\||;|\n)\s*git\s+commit\b[^&|;<(\n]*\s--amend\b",
-        command,
-    ):
+    # git commit --amend（Issue #1285: TDD 順序改竄防止・Issue #1352 / #3955 で誤検知修正）
+    # トークン照合（先頭トークンが `git`、トークン列に `commit` と `--amend` が
+    # 独立トークンとして存在するセグメントのみ）でブロックする（Issue #3955）。
+    # heredoc 本文除去済みの command_for_check を使うため、-m 本文・heredoc 本文・
+    # gh issue create --body の値に含まれる説明テキストは判定対象に含まれない。
+    if _is_amend_invocation(command_for_check):
         sys.stderr.write(
             "BLOCK: 危険なgit操作: git commit --amend（TDD RED-GREEN 順序改竄防止）\n"
             "既にコミット済みの内容を書き換えると、require-red-first hook が commit 履歴から\n"
