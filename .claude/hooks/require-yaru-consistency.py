@@ -73,6 +73,14 @@ def _has_invalid_tracking_marker(body: str) -> bool:
     return bool(find_invalid_syntax(body, [_YARU_TRACKING_MARKER]))
 
 
+def _write_invalid_marker_message(issue_number: int) -> None:
+    sys.stderr.write(
+        f"Blocked: Issue #{issue_number} の yaru-tracking marker の書式が不正です。\n"
+        "正しい書式: <!-- yaru-tracking: #<follow-up-issue-num> -->\n"
+        "詳細: docs/reference/hooks.md#require-yaru-consistencypy\n"
+    )
+
+
 def _all_remaining_are_manual_or_ai_confirm(unchecked_items: list[str]) -> bool:
     from _lib.yaru_sections import has_manual_or_ai_confirm_prefix
 
@@ -98,61 +106,74 @@ def _main() -> int:
     from _lib.yaru_sections import fetch_issue_body as _fetch_issue_body
     from _lib.yaru_sections import parse_unchecked_items as _extract_unchecked_items
 
+    def _evaluate(target_body: str) -> tuple[str, list[str]]:
+        """body を評価し、("ok", []) / ("invalid_marker", []) / ("blocked", 未チェック項目) を返す.
+
+        Issue #3961 codex レビュー指摘: 無効 marker チェックを他の判定より先に
+        `return` してしまうと、#3119 のブロック確定前 cache bypass 再取得
+        （stale body 基準で block 判定が確定した後にのみ実行）に到達できず、
+        marker の書式修正が fresh_body に反映されていても stale body の無効
+        marker のみを理由に即 block してしまう。判定ロジックを 1 関数へ集約し、
+        `_main` 側で stale/fresh 両方に同じ評価を適用できるようにする。
+        """
+        if _has_invalid_tracking_marker(target_body):
+            return "invalid_marker", []
+
+        yaru_section = _extract_yaru_section(target_body)
+        if yaru_section is None:
+            # やること セクション自体がなければ対象外 (docs Issue 等)
+            return "ok", []
+
+        items = _extract_unchecked_items(yaru_section)
+        if not items:
+            # 全 checked
+            return "ok", []
+
+        # 残 [手動] / [AI確認] のみなら OK
+        if _all_remaining_are_manual_or_ai_confirm(items):
+            return "ok", []
+
+        # tracking marker で bypass
+        if _has_valid_tracking_marker(target_body):
+            return "ok", []
+
+        return "blocked", items
+
     body = _fetch_issue_body(issue_number)
     if body is None:
         # 取得失敗は silent skip (network エラー等で close 自体を止めない)
         return 0
 
-    # 無効な yaru-tracking marker を先にチェック
-    if _has_invalid_tracking_marker(body):
-        sys.stderr.write(
-            f"Blocked: Issue #{issue_number} の yaru-tracking marker の書式が不正です。\n"
-            "正しい書式: <!-- yaru-tracking: #<follow-up-issue-num> -->\n"
-            "詳細: docs/reference/hooks.md#require-yaru-consistencypy\n"
-        )
-        return 2
-
-    yaru_section = _extract_yaru_section(body)
-    if yaru_section is None:
-        # やること セクション自体がなければ対象外 (docs Issue 等)
-        return 0
-
-    unchecked_items = _extract_unchecked_items(yaru_section)
-    if not unchecked_items:
-        # 全 checked
-        return 0
-
-    # 残 [手動] / [AI確認] のみなら OK
-    if _all_remaining_are_manual_or_ai_confirm(unchecked_items):
-        return 0
-
-    # tracking marker で bypass
-    if _has_valid_tracking_marker(body):
+    verdict, unchecked_items = _evaluate(body)
+    if verdict == "ok":
         return 0
 
     # Issue #3119: gh_cache（TTL 300 秒・SWR）が編集前 body を保持し続け、直後に
     # やること checkbox を更新して close し直しても stale hit で誤ブロックし続ける
     # 問題への対応。ブロックを確定させる前に 1 回だけ cache を bypass して最新
     # body を再取得し、再判定する。
+    # Issue #3959/#3961: stale body が無効/欠落 yaru-tracking marker を理由に
+    # block 判定 (`verdict != "ok"`) となった場合も、fresh_body で marker が
+    # 修正済みなら再評価してブロックしない。
     from _lib.yaru_sections import (
         fetch_issue_body_bypass_cache as _fetch_issue_body_fresh,
     )
 
     fresh_body = _fetch_issue_body_fresh(issue_number)
     if fresh_body is not None:
-        fresh_yaru_section = _extract_yaru_section(fresh_body)
-        fresh_unchecked_items = (
-            _extract_unchecked_items(fresh_yaru_section)
-            if fresh_yaru_section is not None
-            else []
-        )
-        if not fresh_unchecked_items or _all_remaining_are_manual_or_ai_confirm(
-            fresh_unchecked_items
-        ):
-            # 最新 body では全チェック済み (または残りが [手動]/[AI確認] のみ) → ブロックしない
+        fresh_verdict, fresh_unchecked_items = _evaluate(fresh_body)
+        if fresh_verdict == "ok":
             return 0
+        if fresh_verdict == "invalid_marker":
+            _write_invalid_marker_message(issue_number)
+            return 2
         # 再取得しても未チェックが残る場合は、最新の状態を使って従来どおりブロックする
         unchecked_items = fresh_unchecked_items
+
+    if verdict == "invalid_marker" and fresh_body is None:
+        # 再取得自体が失敗した場合は stale body の無効 marker 判定を維持する
+        _write_invalid_marker_message(issue_number)
+        return 2
 
     # Block
     sys.stderr.write(
