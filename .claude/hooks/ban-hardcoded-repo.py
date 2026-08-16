@@ -60,6 +60,7 @@ from _lib.hook_io import (
     is_hook_enabled,
     read_hook_input,
     resolve_target_cwd,
+    to_repo_relative_posix_path,
 )
 from _lib.shell_parse import split_shell_fragments
 
@@ -151,12 +152,9 @@ def _check_edit_write_tool(
 
     # パスプレフィックスでスコープを絞る（scripts/ .claude/ agt/ 配下のみ）
     # 絶対パスの場合は git_root からの相対パスに変換を試みる
-    rel_path = file_path
-    if os.path.isabs(file_path) and git_root:
-        try:
-            rel_path = os.path.relpath(file_path, git_root)
-        except ValueError:
-            pass
+    # Issue #3890: Windows ネイティブ環境では `os.path.relpath()` がバックスラッシュ
+    # 区切りを返すため、共通ヘルパーでフォワードスラッシュへ正規化してから判定する。
+    rel_path = to_repo_relative_posix_path(file_path, git_root)
     if not _EDIT_PATH_RE.match(rel_path):
         return 0
 

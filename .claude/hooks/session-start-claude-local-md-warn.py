@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_hooks_config_path, is_hook_enabled
+from _lib.hook_io import get_hooks_config_path, is_hook_enabled, read_hook_input
 
 _HOOK_NAME = "session-start-claude-local-md-warn"
 
@@ -62,6 +62,8 @@ def _resolve_repo_root(override: str | None) -> Path | None:
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
         )
@@ -141,6 +143,11 @@ def main() -> int:
     # Issue #1633: hook 機能別 on/off（default OFF・opt-in）
     if not is_hook_enabled(_HOOK_NAME):
         return 0
+    # Issue #3895 レビュー指摘: 本 hook は payload を使わないが、stdout/stderr を
+    # UTF-8 へ reconfigure する処理（`_ensure_utf8_streams()`）が `read_hook_input()`
+    # 経由でしか呼ばれないため、ここを経由しないと WARN/BLOCK メッセージが cp932 環境で
+    # 文字化けしたまま出力されてしまう。
+    read_hook_input(hook_name="SessionStart")
 
     override = os.environ.get("CLAUDE_LOCAL_MD_WARN_REPO_ROOT")
     repo_root = _resolve_repo_root(override)

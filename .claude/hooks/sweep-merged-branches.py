@@ -88,6 +88,8 @@ def _run_sweep(payload: dict[str, Any], command: str | None) -> int:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_SWEEP_TIMEOUT_SECONDS,
             check=False,
         )

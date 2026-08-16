@@ -41,6 +41,7 @@ stdout に判定根拠を JSON 1 行（キー: `verdict` / `failed_files` / `cha
 | 0（`verdict: existing`） | 既存問題（条件①かつ②が成立） | 下記「自動修正フロー」を実行する |
 | 1（`verdict: pr_issue`） | 現在の PR/対象 Issue 自体の問題 | **JSON の `condition1` が `true` かつ `condition2` が `false` の場合のみ**、下記「条件②' 環境依存フレーキーテスト判定（Issue #2094）」の検討に進む。それ以外（`condition1` が `false`）は自動修正フロー（別 Issue 起票）は起動しない。下記「PR/pre-flight 起因時のエスカレーション」へ |
 | 2（`verdict: unknown`） | 突合判定不能（失敗テストのパスを特定できない等） | 既存問題と推定せず、下記「PR/pre-flight 起因時のエスカレーション」へ |
+| 2（`verdict: crash_unrecoverable`） | 突合判定不能。pytest が `INTERNALERROR`（pytest-xdist worker crash 等）でクラッシュし、FAILED サマリ行を一切出力せず終了した（ファイルパス特定の失敗ではなくクラッシュが原因・Issue #3908） | 既存問題と推定せず、下記「PR/pre-flight 起因時のエスカレーション」へ。stderr のメッセージでクラッシュが原因であることを確認できる |
 
 ### 条件②' 環境依存フレーキーテスト判定（Issue #2094）
 

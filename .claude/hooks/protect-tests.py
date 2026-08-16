@@ -50,6 +50,7 @@ from _lib.hook_io import (
     is_file_edit_tool,
     is_hook_enabled,
     read_hook_input,
+    to_repo_relative_posix_path,
 )
 from _lib.override_markers import (
     extract_reason,
@@ -104,6 +105,12 @@ def _normalize_path(
 
     Issue #2454（PR #2476 レビュー指摘）: 相対パスの絶対化基点はプロセス CWD
     （メイン checkout）ではなく、呼び出し元が解決した worktree 起点（base_dir）を使う。
+
+    Issue #3890: Windows ネイティブ環境では ``os.path.realpath()`` がバックスラッシュ
+    区切り（``C:\\Users\\...``）を返す一方、``git_root``（``git rev-parse
+    --show-toplevel`` の結果）はフォワードスラッシュ（``C:/Users/...``）のため、
+    素朴な prefix 一致は必ず失敗する。共通ヘルパー `to_repo_relative_posix_path()`
+    で区切り文字を正規化してから prefix 照合する。
     """
     if not git_root:
         return file_path
@@ -115,11 +122,8 @@ def _normalize_path(
         resolved = os.path.realpath(file_path)
     except OSError:
         resolved = file_path
-    # GIT_ROOT 配下なら相対パス化
-    prefix = git_root.rstrip("/") + "/"
-    if resolved.startswith(prefix):
-        return resolved[len(prefix) :]
-    return resolved
+    # GIT_ROOT 配下なら相対パス化（Issue #3890: 区切り文字を正規化してから照合）
+    return to_repo_relative_posix_path(resolved, git_root)
 
 
 _PROTECTED_RES = [
@@ -137,7 +141,13 @@ def _is_tracked(file_path: str, git_root: str | None) -> bool:
     cmd.extend(["ls-files", "--error-unmatch", "--", file_path])
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=5
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
@@ -156,6 +166,8 @@ def _fetch_pr_body_from_gh(git_root: str | None = None) -> str:
             ["gh", "pr", "view", "--json", "body", "--jq", ".body"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=15,
             cwd=git_root,

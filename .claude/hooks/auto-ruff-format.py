@@ -29,6 +29,7 @@ from _lib.hook_io import (
     is_hook_enabled,
     read_hook_input,
 )
+from _lib.venv_python import find_venv_executable as _find_venv_executable
 
 # ruff format の対象ディレクトリ（この配下の .py のみ）
 _TARGET_SUBDIR = "projects/py/tidd_tools/"
@@ -69,11 +70,14 @@ def _main() -> int:
     # Issue #1890: ruff を git_root/.venv/bin/ruff で直接実行してネットワーク不要にする。
     # `uv run --with ruff` / `uv run --project ... --extra dev` はどちらも
     # cold cache + ネットワーク断で ruff 取得に失敗し silent 失敗する（根本原因）。
-    # `.venv/bin/ruff` は workspace venv（`uv sync` 後）にインストール済みのため
+    # workspace venv（`uv sync` 後）にインストール済みの ruff を直接呼ぶため
     # ネットワーク不要で最速。不在の場合は WARN + exit 0 でスキップし、
     # `require-ruff-format.py` の PR 作成前ゲートに委ねる。
-    venv_ruff = Path(git_root) / ".venv" / "bin" / "ruff"
-    if not venv_ruff.is_file():
+    # Issue #3896: `.venv/bin/ruff` 決め打ちだと Windows ネイティブの venv
+    # （`.venv/Scripts/ruff.exe`）で解決に失敗し恒久 no-op になるため、
+    # `_lib/venv_python.py` 共通ヘルパーで OS レイアウトを問わず解決する。
+    venv_ruff = _find_venv_executable(Path(git_root), "ruff")
+    if venv_ruff is None:
         print(
             "WARN: auto-ruff-format: .venv/bin/ruff が見つかりません。"
             " `uv sync --all-extras` を実行して workspace venv を作成してください。"
@@ -87,6 +91,8 @@ def _main() -> int:
             [str(venv_ruff), "format", abs_file],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=60,
         )

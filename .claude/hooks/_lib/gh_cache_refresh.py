@@ -34,6 +34,8 @@ def _rate_limit_remaining() -> int | None:
             ["gh", "api", "rate_limit", "--jq", ".resources.core.remaining"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
         )
@@ -51,6 +53,8 @@ def _fetch_issue(issue_number: int) -> dict | None:
             ["gh", "issue", "view", str(issue_number), "--json", "number,title,state"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=15,
         )

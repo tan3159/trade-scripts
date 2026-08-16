@@ -570,6 +570,8 @@ def _validate_gh_edit_fragment(gh_edit_fragment: str) -> list[str]:
                 [gh_bin, "issue", "view", issue_num, "--json", "body"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
                 timeout=GH_VIEW_TIMEOUT_SEC,
             )

@@ -39,6 +39,7 @@ from _lib.hook_io import (
     is_file_edit_tool,
     is_hook_enabled,
     read_hook_input,
+    to_posix_path,
 )
 
 # `Path(__file__)[.resolve()].parents[<数字>]` を検出（.resolve() 任意・プレースホルダ `[N]` はマッチしない）
@@ -80,12 +81,16 @@ def _main() -> int:
     if not file_path:
         return 0
 
+    # Issue #3890: Windows ネイティブ環境ではバックスラッシュ区切りの絶対パスが
+    # そのまま届くため、`/` 前提の `_TARGET_PATH_RE` に一致させるため正規化する。
+    normalized_path = to_posix_path(file_path)
+
     # .py 以外は対象外
-    if Path(file_path).suffix.lower() != ".py":
+    if Path(normalized_path).suffix.lower() != ".py":
         return 0
 
     # tests/ 配下でなければ対象外
-    if not _TARGET_PATH_RE.search(file_path):
+    if not _TARGET_PATH_RE.search(normalized_path):
         return 0
 
     content = _get_new_content(payload)

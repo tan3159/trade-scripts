@@ -85,6 +85,8 @@ def _has_quality_check_comment(issue_num: int) -> bool:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
         )

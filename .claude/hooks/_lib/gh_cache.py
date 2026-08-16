@@ -38,6 +38,8 @@ def _resolve_db_path() -> Path:
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
         )
@@ -128,6 +130,8 @@ def _current_git_branch(cwd: str | None = None) -> str | None:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
             cwd=cwd,
@@ -285,6 +289,71 @@ def _bg_lock_path(issue_number: int) -> Path:
     return lock_dir / f"gh-cache-{issue_number}.lock"
 
 
+#: Windows Win32 API OpenProcess のアクセス権フラグ（プロセス存在・起動時刻確認のみに必要な最小権限）
+_WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _win_process_creation_time(pid: int) -> int | None:
+    """Windows で `pid` のプロセス起動時刻を返す。取得失敗時は None (Issue #3897).
+
+    ``/proc`` が存在しない Windows では ``/proc/<pid>/cmdline`` によるプロセス同定が
+    できないため、代わりに Win32 API ``GetProcessTimes``（ctypes 経由・stdlib のみ）で
+    取得した起動時刻（FILETIME・100ns 単位）を識別マーカーとして使う。spawn 直後に
+    記録した値と cleanup 時点の値が一致する場合のみ「同一プロセス」と同定する。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = kernel32.OpenProcess(_WIN_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        creation = wintypes.FILETIME()
+        exit_time = wintypes.FILETIME()
+        kernel_time = wintypes.FILETIME()
+        user_time = wintypes.FILETIME()
+        ok = kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        )
+        if not ok:
+            return None
+        return (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _is_safe_to_kill(pid: int, recorded_win_start: int | None) -> bool:
+    """`pid` が gh_cache 自身が起動した BG refresh プロセスだと同定できれば True (Issue #3897).
+
+    PID 再利用による誤 kill を防ぐため、プロセス同定に**成功した場合のみ** True を返す。
+    同定できない場合（Windows で marker 未記録・取得失敗、または /proc 未対応環境など）は
+    False を返し kill しない（fail-safe。旧実装は同定不能時に True を返す fail-open だった）。
+
+    - POSIX（``/proc`` 対応環境）: ``/proc/<pid>/cmdline`` に ``gh_cache_refresh`` が
+      含まれるかで同定する（従来どおり）。
+    - Windows: spawn 時に記録したプロセス起動時刻 (`recorded_win_start`) と、
+      現在の `pid` の実際の起動時刻が一致するかで同定する（`_win_process_creation_time`）。
+    """
+    if sys.platform == "win32":
+        if recorded_win_start is None:
+            return False
+        current_start = _win_process_creation_time(pid)
+        return current_start is not None and current_start == recorded_win_start
+    proc_cmdline = Path(f"/proc/{pid}/cmdline")
+    if not proc_cmdline.is_file():
+        return False
+    try:
+        cmd = proc_cmdline.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "gh_cache_refresh" in cmd
+
+
 def _cleanup_stale_bg_pids(max_age_hours: int = 24) -> None:
     """Issue #1459: 古い BG PID ファイルの zombie を SIGTERM で掃除する.
 
@@ -292,8 +361,10 @@ def _cleanup_stale_bg_pids(max_age_hours: int = 24) -> None:
     ものについて、対応するプロセスに SIGTERM を送り、ファイルを削除する。
 
     Issue #1459 attempt 2 反映 (INFO): PID 再利用による誤 SIGTERM を防ぐため、
-    まず ``/proc/<pid>/cmdline`` を確認して gh_cache_refresh.py 由来かをチェックする。
-    /proc 未対応環境 (WSL2 一部・macOS) では従来通りの動作を維持する。
+    ``_is_safe_to_kill()`` でプロセス同定を行う。
+
+    Issue #3897: 同定に失敗した場合は kill しない (fail-safe)。旧実装は
+    ``/proc`` 未対応環境（Windows 全般・WSL2 一部・macOS）で常に fail-open していた。
     """
     import signal
     import time as _time
@@ -314,26 +385,27 @@ def _cleanup_stale_bg_pids(max_age_hours: int = 24) -> None:
             pid = int(pid_str) if pid_str else 0
         except (OSError, ValueError):
             pid = 0
-        if pid > 0:
-            # PID 再利用による誤 SIGTERM を防ぐ: cmdline 確認 (best-effort)
-            proc_cmdline = Path(f"/proc/{pid}/cmdline")
-            safe_to_kill = True
-            if proc_cmdline.is_file():
-                try:
-                    cmd = proc_cmdline.read_text(encoding="utf-8", errors="replace")
-                    # gh_cache_refresh.py 由来でなければ別プロセスなので kill しない
-                    if "gh_cache_refresh" not in cmd:
-                        safe_to_kill = False
-                except OSError:
-                    # /proc 読み取り失敗は kill を保留 (安全側)
-                    safe_to_kill = False
-            if safe_to_kill:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError, OSError):
-                    pass
+        # Issue #3897: Windows 向けの起動時刻マーカー（spawn 時に記録・存在しない場合は None）
+        win_start_file = pid_file.with_suffix(".win_start")
+        recorded_win_start: int | None = None
+        if win_start_file.is_file():
+            try:
+                recorded_win_start = int(
+                    win_start_file.read_text(encoding="utf-8").strip()
+                )
+            except (OSError, ValueError):
+                recorded_win_start = None
+        if pid > 0 and _is_safe_to_kill(pid, recorded_win_start):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
         try:
             pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            win_start_file.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -376,14 +448,26 @@ def _spawn_background_refresh(issue_number: int) -> None:
                 pass
         lock_fd = None
 
+    popen_kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if sys.platform == "win32":
+        # Issue #3897: start_new_session=True は Windows で例外にならず黙って無視される
+        # （プロセスグループが作られないため切り離しの前提が崩れる）。Windows 向けの
+        # プロセス切り離し代替手段として DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP を使う。
+        popen_kwargs["creationflags"] = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+
     try:
         proc = subprocess.Popen(
             [sys.executable, str(refresh_helper), str(issue_number)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
+            **popen_kwargs,
         )
     except (FileNotFoundError, OSError):
         # ロックは自動解放（fd close 時）
@@ -399,6 +483,14 @@ def _spawn_background_refresh(issue_number: int) -> None:
         pid_dir = _bg_pid_dir()
         pid_dir.mkdir(parents=True, exist_ok=True)
         (pid_dir / f"{issue_number}.pid").write_text(str(proc.pid), encoding="utf-8")
+        # Issue #3897: Windows では /proc が無くプロセス同定に cmdline を使えないため、
+        # 起動時刻を識別マーカーとして記録し、cleanup 時の PID 再利用検知に使う。
+        if sys.platform == "win32":
+            win_start = _win_process_creation_time(proc.pid)
+            if win_start is not None:
+                (pid_dir / f"{issue_number}.win_start").write_text(
+                    str(win_start), encoding="utf-8"
+                )
     except OSError:
         pass
     # 注: lock_fd はここでは close しない
