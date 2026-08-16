@@ -302,7 +302,13 @@ def gh_pr_view_json(pr_num: str, fields: list[str]) -> dict | None:
     cmd = ["gh", "pr", "view", str(pr_num), "--json", ",".join(fields)]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=10
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

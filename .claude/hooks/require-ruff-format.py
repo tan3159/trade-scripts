@@ -54,6 +54,7 @@ from _lib.issue_ref import (
 )
 from _lib.target_dir import find_target_dir as _find_target_dir_shared
 from _lib.target_dir import get_timeout_sec as _get_timeout_sec_shared
+from _lib.venv_python import find_venv_executable as _find_venv_executable
 
 _PROJECTS_PY_SUBDIR = "projects/py"
 _PREFERRED_PROJECT_NAME = "tidd_tools"
@@ -93,6 +94,8 @@ def _get_current_branch(repo_root: Path) -> str | None:
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
         )
@@ -128,6 +131,8 @@ def _apply_ruff_format_and_commit(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=_get_timeout_sec(),
         )
@@ -153,6 +158,8 @@ def _apply_ruff_format_and_commit(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=_get_timeout_sec(),
         )
@@ -178,6 +185,8 @@ def _apply_ruff_format_and_commit(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
         )
@@ -205,6 +214,8 @@ def _apply_ruff_format_and_commit(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
         )
@@ -272,6 +283,8 @@ def _main() -> int:
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=_get_timeout_sec(),
         )
@@ -320,8 +333,11 @@ def _main() -> int:
         return 2
 
     # 非 0 exit = 未整形ファイル検出。.venv/bin/ruff で自動整形を試みる（Issue #1934）。
-    venv_ruff = repo_root / ".venv" / "bin" / "ruff"
-    if not venv_ruff.is_file():
+    # Issue #3896: `.venv/bin/ruff` 決め打ちだと Windows ネイティブの venv
+    # （`.venv/Scripts/ruff.exe`）で解決に失敗し自動整形フォールバックが死ぬため、
+    # `_lib/venv_python.py` 共通ヘルパーで OS レイアウトを問わず解決する。
+    venv_ruff = _find_venv_executable(repo_root, "ruff")
+    if venv_ruff is None:
         # ruff 不在 → 従来どおり exit 2 でブロック（stderr はトークン削減のため短縮・#3431）
         ruff_lines = [line for line in ruff_output.splitlines() if line.strip()]
         sys.stderr.write("Blocked: ruff format 未適用のファイルがあります。\n")

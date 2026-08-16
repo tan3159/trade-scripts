@@ -33,12 +33,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.git_helpers import git_toplevel
-from _lib.hook_io import is_hook_enabled
+from _lib.hook_io import is_hook_enabled, read_hook_input
 from _lib.tidd_uvx import check_uvx_wrapper_tag_sync
 
-# グローバル tidd tool の dist-info が置かれるディレクトリ
-_TOOL_ENV_ROOT = Path.home() / ".local" / "share" / "uv" / "tools" / "tidd-tools"
 _DIST_INFO_GLOB = "tidd_tools-*.dist-info"
+
+
+def _tool_env_root() -> Path:
+    """グローバル tidd tool の dist-info が置かれるディレクトリを返す.
+
+    Issue #3915: 以前はモジュールトップレベルで `Path.home()` を評価する定数
+    （`_TOOL_ENV_ROOT`）だったため、import 時点（テストの HOME/USERPROFILE 隔離が
+    適用される前）の実ユーザーのホームを捕捉してしまい、hook 関数を in-process で
+    直接 import して呼ぶ契約テストで後続の隔離が反映されなくなる可能性があった
+    （`health_check.py` の `_global_tool_env_root()` と同型の修正・#3894）。
+    呼び出し時に遅延評価する関数へ変更する。
+    """
+    return Path.home() / ".local" / "share" / "uv" / "tools" / "tidd-tools"
 
 
 def _find_global_entry_points_txt() -> Path | None:
@@ -47,7 +58,7 @@ def _find_global_entry_points_txt() -> Path | None:
     dist-info ディレクトリが存在しない場合、または editable install でない場合は None を返す。
     editable install 判定は `direct_url.json` の `dir_info.editable` で行う。
     """
-    site_packages = _TOOL_ENV_ROOT / "lib"
+    site_packages = _tool_env_root() / "lib"
     if not site_packages.is_dir():
         return None
 
@@ -178,6 +189,12 @@ def main() -> int:
     """メインエントリポイント."""
     if not is_hook_enabled("sync-global-tidd-entrypoints"):
         return 0
+
+    # Issue #3895 レビュー指摘: 本 hook は payload を使わないが、stdout/stderr を
+    # UTF-8 へ reconfigure する処理（`_ensure_utf8_streams()`）が `read_hook_input()`
+    # 経由でしか呼ばれないため、ここを経由しないと `_notify_uvx_wrapper_mismatch()` の
+    # 日本語 stderr 出力が cp932 環境で文字化けしたまま出力されてしまう。
+    read_hook_input(hook_name="SessionStart")
 
     _notify_uvx_wrapper_mismatch()
 

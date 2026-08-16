@@ -44,6 +44,8 @@ def _resolve_cache_dir() -> Path:
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
         )
@@ -71,7 +73,13 @@ _TTL_CURRENT_BRANCH_PR = 120
 def _gh(*args: str, timeout: int = 15) -> str | None:
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=timeout
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -400,6 +408,8 @@ def _run_health_check() -> None:
                 [str(venv_python), "-m", "tidd_tools", "health-check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=60,
                 cwd=root,
                 check=False,
@@ -424,6 +434,8 @@ def _run_health_check() -> None:
             uvx_cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
             cwd=root,
             check=False,

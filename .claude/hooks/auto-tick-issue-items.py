@@ -125,6 +125,8 @@ def _get_changed_files() -> list[str] | None:
             ["git", "diff", "--no-color", "--name-only", "origin/main...HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=15,
         )
@@ -148,6 +150,8 @@ def _gh_issue_edit_body(issue_number: int, new_body: str) -> bool:
             ["gh", "issue", "edit", str(issue_number), "--body-file", tmp_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=15,
         )
@@ -162,6 +166,8 @@ def _gh_issue_comment(issue_number: int, comment: str) -> bool:
             ["gh", "issue", "comment", str(issue_number), "--body", comment],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=15,
         )

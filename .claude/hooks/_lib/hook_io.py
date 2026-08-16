@@ -43,6 +43,26 @@ Issue #3569: `is_hook_enabled()` にリポジトリ単位オーバーライド�
 default）。`.tidd/` はリポジトリ全体が既に `.gitignore` 対象（#2311）でローカル限定。
 `get_hooks_config_path()` 自体は既存 `get_hook_config()` 等の呼び出し元との互換性を
 保つため、返り値（マシン単位パス）は変更しない。
+
+Issue #3878: `append_timing_event()`/`has_timing_event()` に一時的な SQLite ロック競合
+（``sqlite3.OperationalError``: "database is locked"/"database is busy"）への
+リトライを追加した（`_run_sqlite_with_retry()`）。並行実行される複数 worktree/subagent
+セッションが同時に timing.db へ書き込むと、従来は 1 回の接続・書き込み試行で
+失敗すると即座に記録を諦めていた（fail-open が「1 回失敗したら二度と記録しない」に
+なっていた）。"locked"/"busy" を含まない `sqlite3.OperationalError`（例: ディスク
+破損）は対象外とし、即座に fail-open へフォールバックする（無限リトライで hook
+実行がハングしないための境界）。
+
+Issue #3890: `to_posix_path()`/`to_repo_relative_posix_path()` を追加。Windows ネイティブ
+環境では ``os.path.realpath()``/``os.path.relpath()`` がバックスラッシュ区切り
+（``C:\\Users\\...``）を返す一方 ``git rev-parse --show-toplevel`` はフォワードスラッシュ
+（``C:/Users/...``）を返すため、POSIX パス前提の文字列 prefix 照合・正規表現マッチが
+必ず失敗していた（`protect-tests.py`・`ban-parents-n.py`・`ban-hardcoded-repo.py` で発覚）。
+``pathlib.PureWindowsPath`` は「pure」path クラス（ファイルシステムにアクセスしない構文
+解析専用のクラス）で、ホスト OS が Linux/macOS でも Windows のパス構文規則（``\\`` と
+``/`` の双方を区切り文字として認識する）を適用できるため、``pathlib.Path``/``os.path`` の
+ホスト OS ネイティブな区切り判定に依存せず正規化できる（テストを Linux 上で実行しても
+Windows 形式パスの挙動を検証できる）。
 """
 
 from __future__ import annotations
@@ -50,8 +70,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import sys
-from pathlib import Path
+import time
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 # ── Issue #2443: 対象リポジトリ CWD 解決 ─────────────────────────────────────
@@ -112,6 +134,95 @@ def resolve_target_cwd(payload: dict[str, Any], command: str | None = None) -> s
     return os.getcwd()
 
 
+# ── Issue #3890: Windows バックスラッシュ区切りパスの正規化 ─────────────────
+#
+# Windows ネイティブ環境では ``os.path.realpath()``/``os.path.relpath()`` が
+# バックスラッシュ区切り（``C:\Users\...``）を返す一方、
+# ``git rev-parse --show-toplevel`` はフォワードスラッシュ（``C:/Users/...``）を
+# 返すため、POSIX パス前提の素朴な文字列 prefix 照合・正規表現マッチは必ず
+# 失敗する。``pathlib.PureWindowsPath`` はファイルシステムにアクセスしない
+# 構文解析専用の「pure」path クラスで、ホスト OS が Linux/macOS でも Windows の
+# パス構文規則（``\`` と ``/`` の双方を区切り文字として認識する）を適用できる
+# ため、hook のパス判定系はここに集約したヘルパー経由で正規化すること。
+
+
+def to_posix_path(path: str) -> str:
+    """パス区切り文字をホスト OS に依存せず POSIX 形式（``/``）へ正規化する（Issue #3890）.
+
+    ``pathlib.PureWindowsPath(path).as_posix()`` は、実行中のホスト OS が
+    Linux/macOS であっても Windows のパス構文規則（``\\`` を区切り文字として
+    認識する）を適用できるため、``os.path``/``pathlib.Path`` のホスト OS
+    ネイティブな判定に依存する既存実装（Windows 実機以外では検証できない）と
+    異なり、任意のホスト上のテストで Windows 形式パスの挙動を検証できる。
+
+    フォワードスラッシュのみで構成された POSIX パスに対しても安全に適用できる
+    （``PureWindowsPath`` は ``/`` も区切り文字として認識するため副作用がない）。
+
+    Args:
+        path: 正規化対象のパス文字列。
+
+    Returns:
+        バックスラッシュをフォワードスラッシュへ変換したパス。空文字列はそのまま返す。
+    """
+    if not path:
+        return path
+    return PureWindowsPath(path).as_posix()
+
+
+def to_repo_relative_posix_path(file_path: str, git_root: str | None) -> str:
+    """絶対パスをリポジトリルート相対の POSIX 形式パスへ正規化する（Issue #3890）.
+
+    ``protect-tests.py``・``ban-parents-n.py``・``ban-hardcoded-repo.py`` が
+    それぞれ個別に実装していた「絶対パスを git_root からの相対パスへ変換して
+    正規表現マッチする」ロジックの共通ヘルパー。区切り文字を ``to_posix_path()``
+    で正規化してから prefix 照合するため、Windows ネイティブ環境でも
+    ``os.path.realpath()`` の出力（バックスラッシュ区切り）と
+    ``git rev-parse --show-toplevel`` の出力（フォワードスラッシュ）の
+    区切り文字の不一致で判定が失敗することがない。
+
+    Args:
+        file_path: hook payload から取得した生パス（絶対 / 相対どちらでも可）。
+        git_root: ``git rev-parse --show-toplevel`` の結果。``None``・空文字列
+            なら区切り文字の正規化のみ行う。
+
+    Returns:
+        ``git_root`` 配下なら git_root からの相対パス（先頭 ``/`` なし・POSIX
+        区切り）。``git_root`` 外・未指定の場合は区切り文字を正規化した
+        パスをそのまま返す。
+
+    Windows はファイルシステムが大文字小文字を区別しないため、drive レター等の
+    大小文字が ``file_path``（``os.path.realpath()`` 由来）と ``git_root``
+    （``git rev-parse --show-toplevel`` 由来）の間でずれていても prefix 判定は
+    ``casefold()`` により大文字小文字を無視して行う（Issue #3890 AI レビュー指摘）。
+    """
+    if not file_path:
+        return file_path
+    normalized = to_posix_path(file_path)
+    if not git_root:
+        return normalized
+    root_normalized = to_posix_path(git_root).rstrip("/") + "/"
+    if normalized.casefold().startswith(root_normalized.casefold()):
+        return normalized[len(root_normalized) :]
+    return normalized
+
+
+def _ensure_utf8_streams() -> None:
+    """標準出力・標準エラー出力を明示的に UTF-8 へ設定する（Issue #3895）.
+
+    日本語版Windowsでは既定の標準出力エンコーディングが `cp932` であり、絵文字等の
+    非 cp932 文字を含むブロックメッセージを出力しようとすると `UnicodeEncodeError` で
+    クラッシュする（実例: `label-pr.py` の `—`(U+2014) リテラル出力）。
+    `tidd_tools.__main__._ensure_utf8_streams()`（Issue #3603・CLI 専用）と同じ実装を
+    hooks 側にも適用し、`PYTHONUTF8` 環境変数の設定有無・OS のロケールに関わらず
+    常に UTF-8 で出力する。`reconfigure()` をサポートするストリームのみ変更するため、
+    pytest の capsys 等 `reconfigure` を持たない差し替え済みストリームには影響しない。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def read_hook_input(hook_name: str | None = None) -> dict[str, Any]:
     """stdin から hook 入力 JSON を読み取って dict として返す.
 
@@ -124,7 +235,11 @@ def read_hook_input(hook_name: str | None = None) -> dict[str, Any]:
 
     - stdin が空・非 JSON の場合は空 dict を返す（hook 側でスキップ判定する）
     - 例外を投げないことで hook の信頼性を担保する
+    - Issue #3895: 呼び出し直後に stdout/stderr を UTF-8 へ reconfigure する
+      （ほぼ全 hook が本関数を経由するため、日本語ブロックメッセージ出力の
+      cp932 クラッシュ対策をここへ集約する）。
     """
+    _ensure_utf8_streams()
     try:
         data = sys.stdin.read()
     except (OSError, ValueError):
@@ -186,7 +301,11 @@ def read_stop_hook_input() -> dict[str, Any]:
     Returns:
         payload dict。stdin が空・非 JSON・非 dict の場合は空 dict。
         例外を投げない。
+
+    Issue #3895: ``read_hook_input()`` 同様、呼び出し直後に stdout/stderr を
+    UTF-8 へ reconfigure する。
     """
+    _ensure_utf8_streams()
     if sys.stdin.isatty():
         return {}
     try:
@@ -777,13 +896,21 @@ _TIMING_DB_FILENAME = "timing.db"
 # 二重実装の一致は `test_timing_log_hook_io_repo_contract.py` で機械検証する。
 _REMOTE_OWNER_REPO_RE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
 
+# `~/.ssh/config` の Host エイリアス（例: `git@github-being:owner/repo.git`）経由の
+# remote URL からも owner/repo を解決する（Issue #3949）。エイリアスのホスト名は
+# `github.com` 固定にできないため、scp-like 構文（`user@host:path`）であることのみで
+# 判定する。`https://gitlab.com/...` のような無関係な URL 形式（`user@host:` の形を
+# 取らない）は誤って解決しない。
+_SSH_ALIAS_OWNER_REPO_RE = re.compile(r"^[^@/\s]+@[^:/\s]+:([^/]+/[^/]+?)(?:\.git)?/?$")
+
 
 def get_current_repo(cwd: str | None = None) -> str | None:
     """`git remote get-url origin` から現在のリポジトリ（`owner/repo`）を解決する（Issue #3588）.
 
     ``tidd_tools.timing_log.get_current_repo()``（tidd_tools 側）と同型の実装
     （stdlib のみ）。``.claude/hooks/label-pr.py`` の ``_session_repo()``
-    （Issue #2865）とも同型。取得・解析に失敗した場合は None を返し、呼び出し元は
+    （Issue #2865）とも同型。``~/.ssh/config`` の Host エイリアス経由の origin にも
+    対応する（Issue #3949）。取得・解析に失敗した場合は None を返し、呼び出し元は
     repo=NULL で記録する（``append_timing_event()`` の fail-open 方針と同じ）。
 
     Args:
@@ -799,6 +926,8 @@ def get_current_repo(cwd: str | None = None) -> str | None:
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
             cwd=cwd,
@@ -814,6 +943,9 @@ def get_current_repo(cwd: str | None = None) -> str | None:
         return None
     url = result.stdout.strip()
     match = _REMOTE_OWNER_REPO_RE.search(url)
+    if match:
+        return match.group(1)
+    match = _SSH_ALIAS_OWNER_REPO_RE.match(url)
     if not match:
         return None
     return match.group(1)
@@ -858,6 +990,51 @@ def get_timing_db_path() -> Path:
     return get_tidd_cache_dir() / _TIMING_DB_SUBDIR / _TIMING_DB_FILENAME
 
 
+#: `_run_sqlite_with_retry()` のデフォルト最大リトライ回数・初回待機秒数（Issue #3878）。
+#: 合計待機は 0.05+0.1+0.2+0.4=0.75 秒程度で、hook 実行をハングさせない範囲に収める。
+_SQLITE_RETRY_MAX_RETRIES = 4
+_SQLITE_RETRY_INITIAL_WAIT = 0.05
+
+
+def _is_transient_sqlite_lock_error(exc: sqlite3.OperationalError) -> bool:
+    """``sqlite3.OperationalError`` が一時的なロック競合によるものか判定する（Issue #3878）.
+
+    メッセージに "locked"/"busy" を含む場合のみ一時的とみなす。ディスク破損等の
+    非一時的エラーはリトライ対象外とし、呼び出し元の fail-open へ即座にフォールバック
+    させる（無限リトライで hook 実行がハングしないための境界）。
+    """
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
+def _run_sqlite_with_retry(operation: Any) -> Any:
+    """一時的な SQLite ロック競合（``database is locked``）に対する共通リトライ（Issue #3878）.
+
+    `PRAGMA busy_timeout` は SQLite 内部（C レベル）の自動待機だが、busy_timeout の
+    秒数を使い切って `sqlite3.OperationalError` が Python 側まで上がってきた場合の
+    リトライが従来存在しなかった（並行書き込みが集中する複数 worktree/subagent
+    セッション環境で 1 回失敗すると記録を永久に失う・Issue #3878）。
+
+    `operation`（引数なし callable）を呼び出し、`_is_transient_sqlite_lock_error()` が
+    真の `sqlite3.OperationalError` のみ指数バックオフで再試行する。非一時的エラー・
+    リトライ上限到達時は例外をそのまま re-raise し、呼び出し元の
+    ``except (OSError, sqlite3.Error)`` で fail-open にフォールバックさせる。
+    """
+    wait = _SQLITE_RETRY_INITIAL_WAIT
+    for attempt in range(_SQLITE_RETRY_MAX_RETRIES + 1):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if (
+                attempt >= _SQLITE_RETRY_MAX_RETRIES
+                or not _is_transient_sqlite_lock_error(exc)
+            ):
+                raise
+            time.sleep(wait)
+            wait *= 2
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def has_timing_event(issue_key: str, step: str) -> bool:
     """統一日誌に ``issue_key`` の ``step`` イベントが記録済みか確認する（Issue #3340）.
 
@@ -871,13 +1048,15 @@ def has_timing_event(issue_key: str, step: str) -> bool:
     ``events`` テーブルに ``repo`` カラム自体が存在しない場合（``append_timing_event()``
     の migration が未実行の legacy DB）も、読み取り専用の本関数では ALTER TABLE せず
     フィルタなしで問い合わせる（fail-open）。
+
+    **Issue #3878:** 一時的な ``sqlite3.OperationalError``（"database is locked"）は
+    `_run_sqlite_with_retry()` でリトライしてから fail-open を判定する。
     """
     db = get_timing_db_path()
     if not db.is_file():
         return False
-    try:
-        import sqlite3
 
+    def _query() -> Any:
         con = sqlite3.connect(str(db), timeout=3.0)
         try:
             columns = {
@@ -885,18 +1064,20 @@ def has_timing_event(issue_key: str, step: str) -> bool:
             }
             current_repo = get_current_repo() if "repo" in columns else None
             if current_repo is None:
-                row = con.execute(
+                return con.execute(
                     "SELECT 1 FROM events WHERE issue_key = ? AND step = ? LIMIT 1",
                     (issue_key, step),
                 ).fetchone()
-            else:
-                row = con.execute(
-                    "SELECT 1 FROM events WHERE issue_key = ? AND step = ?"
-                    " AND (repo = ? OR repo IS NULL) LIMIT 1",
-                    (issue_key, step, current_repo),
-                ).fetchone()
+            return con.execute(
+                "SELECT 1 FROM events WHERE issue_key = ? AND step = ?"
+                " AND (repo = ? OR repo IS NULL) LIMIT 1",
+                (issue_key, step, current_repo),
+            ).fetchone()
         finally:
             con.close()
+
+    try:
+        row = _run_sqlite_with_retry(_query)
     except (OSError, sqlite3.Error):
         return False
     return row is not None
@@ -925,9 +1106,13 @@ def append_timing_event(
     ファイルへ反映されない。WSL2 等で ``-shm`` が破棄されると WAL 経由でも読めなくなり
     記録が消失するため、``tidd_tools.timing_log._connect()``（Issue #3685）と同じ
     checkpoint を行う。checkpoint 失敗は記録自体を失敗させない（fail-open）。
-    """
-    import sqlite3
 
+    **Issue #3878:** 接続・書き込み全体（connect〜commit）を `_run_sqlite_with_retry()`
+    でラップし、一時的な ``sqlite3.OperationalError``（"database is locked"）は
+    リトライしてから fail-open を判定する。リトライは commit 前の未コミット
+    トランザクションごとやり直すため、二重挿入は発生しない（commit 自体が失敗した
+    場合、そのトランザクションの INSERT は永続化されていない）。
+    """
     now = (
         __import__("datetime")
         .datetime.now(__import__("datetime").UTC)
@@ -935,8 +1120,8 @@ def append_timing_event(
     )
     meta_json = json.dumps(meta or {}, ensure_ascii=False)
     db = get_timing_db_path()
-    try:
-        db.parent.mkdir(parents=True, exist_ok=True)
+
+    def _write() -> None:
         con = sqlite3.connect(str(db), timeout=5.0)
         try:
             con.execute("PRAGMA busy_timeout=5000")
@@ -978,5 +1163,9 @@ def append_timing_event(
                 pass
         finally:
             con.close()
+
+    try:
+        db.parent.mkdir(parents=True, exist_ok=True)
+        _run_sqlite_with_retry(_write)
     except (OSError, sqlite3.Error):
         return

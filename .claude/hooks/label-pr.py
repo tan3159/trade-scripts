@@ -131,6 +131,8 @@ def _fetch_pr_meta(pr_number: str) -> dict[str, Any] | None:
             ["gh", "pr", "view", pr_number, "--json", "headRefName,additions"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -171,6 +173,8 @@ def _pr_number_for_branch(branch: str) -> str | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -218,6 +222,8 @@ def _fetch_pr_number_by_branch(payload: dict[str, Any] | None = None) -> str | N
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
             cwd=cwd,
@@ -250,6 +256,8 @@ def _session_repo(cwd: str | None = None) -> str | None:
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
             cwd=cwd,
@@ -280,6 +288,8 @@ def _owner_repo_for_pr(pr_number: str) -> str | None:
             ["gh", "pr", "view", pr_number, "--json", "headRepository"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -407,6 +417,8 @@ def _add_label(owner_repo: str, pr_number: str, label: str) -> tuple[bool, str]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -440,6 +452,8 @@ def _remove_label(owner_repo: str, pr_number: str, label: str) -> tuple[bool, st
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -468,6 +482,8 @@ def _fetch_existing_size_labels(pr_number: str) -> list[str] | None:
             ["gh", "pr", "view", pr_number, "--json", "labels"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )

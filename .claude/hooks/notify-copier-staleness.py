@@ -30,7 +30,6 @@ on/off:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -38,7 +37,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import is_hook_enabled
+from _lib.hook_io import is_hook_enabled, read_hook_input
 
 _SRC_PATH_LINE_RE = re.compile(r"^_src_path:\s*(\S+)\s*$", re.MULTILINE)
 # `gh:owner/repo`（GitHub 短縮形）
@@ -133,6 +132,8 @@ def _fetch_latest_upstream_tag(cwd: Path) -> str | None:
             ["git", "ls-remote", "--tags", "--refs", "--sort=-v:refname", upstream],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -148,26 +149,16 @@ def _fetch_latest_upstream_tag(cwd: Path) -> str | None:
     return None
 
 
-def _read_payload() -> dict[str, object]:
-    """SessionStart hook から stdin JSON を読む（読めなくても続行）."""
-    try:
-        raw = sys.stdin.read()
-    except OSError:
-        return {}
-    if not raw.strip():
-        return {}
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-
-
 def main() -> int:
     # hook 機能別 on/off（Issue #2167）
     if not is_hook_enabled("notify-copier-staleness"):
         return 0
 
-    _read_payload()  # SessionStart hook 仕様に合わせて読むが本 hook では未使用
+    # Issue #3895 レビュー指摘: 本 hook は payload を使わないが、stdout/stderr を
+    # UTF-8 へ reconfigure する処理（`_ensure_utf8_streams()`）が `read_hook_input()`
+    # 経由でしか呼ばれないため、ここを経由しないと NOTICE メッセージが cp932 環境で
+    # 文字化けしたまま出力されてしまう。
+    read_hook_input(hook_name="SessionStart")
 
     cwd = Path.cwd()
     current_commit = _read_answers_commit(cwd)

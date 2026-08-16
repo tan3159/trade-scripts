@@ -15,6 +15,9 @@
 - ``run_gh()``: ``gh <args>`` を実行し ``(returncode, stdout)`` タプルを返す
   （Issue #2967: 旧 on-stop.py `_gh` の移設。timeout 超過時は stderr に
   "on-stop: WARN: gh timeout ..." を出力する旧実装の挙動をそのまま踏襲する）。
+  呼び出し側で timeout WARN の出力を抑制したい場合は ``warn_on_timeout=False`` を
+  渡す（Issue #3882: `require-issue-next-completion.py` が連続ブロック時のスライディング
+  ウィンドウ抑制に使う。デフォルト値 ``True`` のため既存呼び出し元の挙動は変わらない）。
 
 stdlib のみ使用（hooks ディレクトリは外部依存を持たない）。
 """
@@ -60,6 +63,8 @@ def run_git(
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=timeout,
         )
@@ -135,7 +140,11 @@ def run_git_in_repo(
     return result.returncode, result.stdout, result.stderr
 
 
-def run_gh(*args: str, timeout: float = DEFAULT_GH_TIMEOUT_SEC) -> tuple[int, str]:
+def run_gh(
+    *args: str,
+    timeout: float = DEFAULT_GH_TIMEOUT_SEC,
+    warn_on_timeout: bool = True,
+) -> tuple[int, str]:
     """``gh <args>`` を実行し ``(returncode, stdout)`` を返す.
 
     Issue #2967: on-stop.py の自前 `_gh()` を移設（挙動変更なし）。
@@ -143,20 +152,31 @@ def run_gh(*args: str, timeout: float = DEFAULT_GH_TIMEOUT_SEC) -> tuple[int, st
     Args:
         *args: gh サブコマンド・オプション。
         timeout: タイムアウト秒数。
+        warn_on_timeout: timeout 超過時に stderr へ WARN を出力するか
+            （Issue #3882: 呼び出し側でスライディングウィンドウ抑制を行う場合に
+            ``False`` を渡す。デフォルト ``True`` は従来の挙動と同じ）。
 
     Returns:
         ``(returncode, stdout)``。gh バイナリ未検出時は ``(1, "")``。
-        timeout 超過時は stderr に WARN を出力したうえで ``(1, "")``。
+        timeout 超過時は（``warn_on_timeout`` が True なら）stderr に WARN を
+        出力したうえで ``(1, "")``。
     """
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=timeout
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout,
         )
     except FileNotFoundError:
         return 1, ""
     except subprocess.TimeoutExpired:
-        sys.stderr.write(
-            f"on-stop: WARN: gh timeout ({timeout}s) for: gh {' '.join(args)}\n"
-        )
+        if warn_on_timeout:
+            sys.stderr.write(
+                f"on-stop: WARN: gh timeout ({timeout}s) for: gh {' '.join(args)}\n"
+            )
         return 1, ""
     return result.returncode, result.stdout

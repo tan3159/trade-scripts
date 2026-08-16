@@ -217,7 +217,13 @@ def _detect_required_contexts(
 def _gh(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=timeout
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None

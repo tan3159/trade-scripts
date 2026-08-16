@@ -70,6 +70,8 @@ def _run_command(cmd: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
         cwd=cwd,
         check=False,

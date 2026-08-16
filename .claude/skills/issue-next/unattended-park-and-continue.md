@@ -69,7 +69,7 @@
 1. **Issue にエスカレーション内容を選択肢形式でコメント投稿する**（`.claude/rules/escalation-format.md` 準拠。Issue **本文は編集しない**、コメントのみに残す）
 2. Issue に `🙋 needs-human-input` ラベルを付与する
 3. **PR が存在する場合**は `gh pr close <PR番号>` で取り下げる（ブランチ・レビューコメントは削除しない。Issue コメントに PR 番号をリンクする）。`gh pr close` が失敗した場合はコメントに「PR close 失敗（PR #<番号>）: 手動で close してください」を追記し、ラベル付与は維持したまま処理を継続する
-4. **worktree が存在する場合**はクリーンアップする（メインリポジトリへ移動して `git worktree remove` → `git branch -D`）。STEP 1.5 時点のエスカレーション（STEP 2 未到達）では PR も worktree も存在しないため 3・4 はスキップする
+4. **worktree が存在する場合**はクリーンアップする。**PR 番号が存在する場合**はまず `gh pr view <PR番号> --json state -q .state` で state を確認し、**`MERGED` の場合**は `tidd cleanup-merged-branch <branch>` を実行する（worktree・branch 削除と同時に `step6-cleanup-done` を自己記録するため・#3556。生の `git worktree remove` / `git branch -D` を直接叩くと自己記録が漏れ `merge-summary:incomplete-marks` を誤検知する・#3865）。**PR 番号が存在しない場合（STEP 2 の pre-flight 失敗等、PR 作成前に park した場合）、または state が `MERGED` でない場合**（3 で `close` した通常経路）は、メインリポジトリへ移動して `git worktree remove <worktree パス>` のみ実行する。**この経路ではローカルブランチを削除しない**（生の `git branch -D` は `block-dangerous-git.py` が PR MERGED を安全条件として要求するため非 MERGED ブランチでは必ずブロックされ、`tidd cleanup-merged-branch` も同じ理由で使えない・#3865）。削除されず残ったローカルブランチは無害（次 Issue の処理を妨げない）なので、そのまま park-and-continue の継続を優先し、整理は別途人間判断に委ねる。STEP 1.5 時点のエスカレーション（STEP 2 未到達）では PR も worktree も存在しないため 3・4 はスキップする
 5. 次の Issue へ継続する（park 上限は設けない。無制限に継続する）:
    - **引数なし:** STEP 1 の引数なしモード事前チェック（並行 PR 数の上限チェック）から再実行する
    - **単一番号指定:** 継続すべき次の番号がないため、park 完了を報告して終了する

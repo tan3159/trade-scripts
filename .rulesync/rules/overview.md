@@ -27,7 +27,7 @@ Codex の 32KiB 上限（`project_doc_max_bytes`）へ波及する。
 
 ## 状況依存ルールの参照
 
-- **スクリーンショット参照:** `docs/reference/screenshot-rules.md`
+- **スクリーンショット参照:** `tidd screenshot-attach --latest` の出力パスを Claude Code は `Read`、Codex は `view_image` で開く。詳細: `docs/reference/screenshot-rules.md`
 
 ## 行動原則
 

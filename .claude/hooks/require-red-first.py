@@ -57,6 +57,7 @@ from _lib.override_markers import (
     find_invalid_syntax,
     has_override_marker,
 )
+from _lib.venv_python import find_venv_python as _find_venv_python_shared
 
 _GH_PR_CREATE_RE = re.compile(r"(^|&&|;|\|)\s*gh pr create(\s|$)")
 _SKIP_BRANCH_PREFIXES = _tdd_order_check.SKIP_BRANCH_PREFIXES
@@ -72,6 +73,8 @@ def _current_branch() -> str:
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=3,
             cwd=_TARGET_CWD,
@@ -141,6 +144,8 @@ def _collect_new_test_files() -> list[str]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
             cwd=_TARGET_CWD,
@@ -212,6 +217,8 @@ def _run_tests_at_commit(
                 ["git", "worktree", "add", "--detach", tmp_dir, commit_sha],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
                 timeout=30,
                 cwd=_TARGET_CWD,
@@ -246,6 +253,8 @@ def _run_tests_at_commit(
                         test_args,
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         check=False,
                         timeout=120,
                         cwd=run_cwd,
@@ -276,6 +285,8 @@ def _run_tests_at_commit(
                         ],
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         check=False,
                         timeout=120,
                         cwd=node_cwd,
@@ -318,20 +329,18 @@ def _find_venv_python() -> Path | None:
     """pytest を実行できる python インタープリタを探して返す（なければ None）.
 
     探索順:
-    1. ``_TARGET_CWD`` 配下の ``.venv/bin/python3`` （本番環境）
+    1. ``_TARGET_CWD`` 配下の venv python（POSIX: ``.venv/bin/python3``/``python``、
+       Windows: ``.venv/Scripts/python.exe``。Issue #3896: ``_lib/venv_python.py``
+       共通ヘルパー経由）
     2. 現在のプロセスの ``sys.executable`` が ``.venv`` 内にある場合はそれを使用
        （テスト環境や hook プロセス自体が venv で起動されている場合）
 
     pytest モジュールが存在しない python は除外する（import check）。
     """
     base = Path(_TARGET_CWD) if _TARGET_CWD else Path.cwd()
-    candidates = [
-        base / ".venv" / "bin" / "python3",
-        base / ".venv" / "bin" / "python",
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
+    found = _find_venv_python_shared(base)
+    if found is not None:
+        return found
     # フォールバック: 現プロセスの python 自体が venv 内にある場合
     current_python = Path(sys.executable)
     if ".venv" in current_python.parts:
@@ -373,6 +382,8 @@ def _collect_new_impl_files() -> list[str]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=10,
             cwd=_TARGET_CWD,

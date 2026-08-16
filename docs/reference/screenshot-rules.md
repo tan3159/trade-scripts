@@ -1,16 +1,26 @@
 # スクリーンショット参照ルール
 
-Claude Code がスクリーンショットを参照・添付するときの手順。
+Claude Code・Codex がスクリーンショットを参照・添付するときの手順。
 
 **対応 OS: WSL / Windows ネイティブのみ。** macOS・Linux ネイティブ環境は自動推定非対応。
 それらの環境では `--screenshot-dir` オプションまたは `SCREENSHOT_DIR` 環境変数を明示指定してください。
+
+## Claude Code / Codex 対応表
+
+`tidd screenshot-attach --latest` が出力した画像パスは、実行中の AI エージェントに応じて
+異なるツールで開く。
+
+| AI エージェント | 画像を開くツール |
+|-----------------|------------------|
+| Claude Code | `Read` |
+| Codex | `view_image` |
 
 ## 最新のスクリーンショットを参照する
 
 「最新のスクショを見て」「スクリーンショットを確認して」などと指示された場合:
 
 1. `tidd screenshot-attach --latest` を実行してパスを取得する
-2. 取得したパスのファイルを `Read` ツールで参照する
+2. 取得したパスのファイルを、Claude Code は `Read`、Codex は `view_image` で参照する（対応表参照）
 
 ```bash
 tidd screenshot-attach --latest
@@ -18,7 +28,7 @@ tidd screenshot-attach --latest
 # 例: /mnt/c/Users/<ユーザー名>/Pictures/Screenshots/スクリーンショット 2025-06-01 120000.png
 ```
 
-出力されたパスを `Read` ツールに渡して画像を参照する。
+出力されたパスを Claude Code は `Read`、Codex は `view_image` に渡して画像を参照する。
 
 ## スクリーンショットを MD に添付する
 

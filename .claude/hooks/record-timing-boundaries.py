@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Timing 境界の機械記録 hook（Issue #3160・断絶修正 #3385・#3518・#3558・#3816）.
+"""Timing 境界の機械記録 hook（Issue #3160・断絶修正 #3385・#3518・#3558・#3816・#3940）.
 
 merge-summary が読む計測境界のうち、SKILL.md / agent のプロンプト指示のみに依存して
 いたマークを、既存の tool 呼び出し発火点から自動記録する:
@@ -24,6 +24,25 @@ merge-summary が読む計測境界のうち、SKILL.md / agent のプロンプ�
 - PostToolUse[Bash] ``gh issue create --parent <N>`` 成功（Issue URL を stdout へ出力）
   → 親 Issue ``issue-<N>`` に ``step1.5-quality-check``
   （``meta.verdict="epic-split"``・#3817）
+- PostToolUse[Bash] ``git commit`` 成功 → コミット対象ファイルの分類に応じて
+  ``step2-test-committed``（テスト資材のみ）/ ``step2-impl-committed``
+  （実装ファイルを含む）を記録する（#3940）
+- PreToolUse[Bash] pytest 起動コマンド検知 → ``step2-test-run``（#3940）
+
+**#3940:** 実装フェーズ（``step2-branch-created`` ～ 最初の ``step3-preflight-start``）の
+間は 1 つのイベントも記録されず、進捗表示（statusline）が長時間「実装」のまま固まって
+停滞と正常進行を区別できない問題に対応する。``git commit`` 成功判定は他の Bash 経路
+（``_handle_gh_pr_create()`` 等）と同じ流儀（``interrupted`` + stdout のコミット結果行
+``[<branch> <sha>]``・``_COMMIT_RESULT_LINE_RE``。``tool_response`` に exit_code キーが
+無いため）。Issue 番号はコミットメッセージの ``closes``/``fixes``/``resolves``/``refs #N``
+を優先し、見つからない場合は現在のブランチ名（``issue-<N>`` 形式・``resolve_target_cwd()``
+で解決した cwd の ``git rev-parse --abbrev-ref HEAD``）へフォールバックする。いずれからも
+解決できなければ記録しない。コミット対象ファイルは ``git show --name-only
+--pretty=format: HEAD`` で解決し、全ファイルが ``tests/`` 配下または ``*.feature`` なら
+``step2-test-committed``、それ以外のファイルを 1 つでも含めば ``step2-impl-committed``
+とする。pytest 起動検知は PreToolUse[Bash] で行うため成否は問わず、Issue 番号はブランチ名
+のみから解決する。いずれの step も 1 Issue 内で繰り返し発生するため、他の境界のような
+冪等スキップ（``_record()``）ではなく毎回追記する（``_append_mark()`` を直接呼ぶ）。
 
 **#3816:** Codex CLI は PostToolUse hook が全面無効（``.rulesync/hooks.jsonc`` の
 ``codexcli.hooks.postToolUse: []`` override・#3223）のため、``gh pr create`` 成功を
@@ -130,6 +149,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib.gh_command import CLOSES_OR_REFS_RE as _CLOSES_OR_REFS_RE
 from _lib.gh_command import extract_closes_issues as _extract_closes_issues
 from _lib.gh_command import (
     extract_gh_issue_create_parent as _extract_gh_issue_create_parent,
@@ -149,6 +169,7 @@ from _lib.gh_command import is_gh_issue_edit as _is_gh_issue_edit
 from _lib.gh_command import is_gh_pr_create as _is_gh_pr_create
 from _lib.git_helpers import git_toplevel as _git_toplevel
 from _lib.git_helpers import run_gh as _run_gh
+from _lib.git_helpers import run_git_in_repo as _run_git_in_repo
 from _lib.hook_io import (
     append_timing_event,
     get_command,
@@ -162,6 +183,9 @@ from _lib.hook_io import (
 )
 from _lib.hook_io import (
     is_bash_success as _is_bash_success,
+)
+from _lib.hook_io import (
+    resolve_target_cwd as _resolve_target_cwd,
 )
 from _lib.issue_ref import (
     extract_first_hash_number as _extract_first_hash_number,
@@ -207,6 +231,28 @@ _SUBAGENT_STEP_TABLE: dict[str, dict[str, str]] = {
 # `git fetch origin && ...` を伴わず単独で `tidd worktree-add ...` のみ実行された
 # 場合に "git" が含まれず記録漏れになっていた。
 _WORKTREE_ADD_CMD_RE = re.compile(r"git\s+worktree\s+add\b|tidd\s+worktree-add\b")
+
+# `git commit` / `git -C <path> commit` の呼び出しを検知する（Issue #3940）。
+# `require-issue.py::_GIT_COMMIT_RE` と同型（チェーン区切り直後・単語境界）。
+_GIT_COMMIT_CMD_RE = re.compile(r"(?:^|&&|;|\n)\s*git(?:\s+-C\s+\S+)?\s+commit\b")
+
+# `git commit` 成功時に stdout へ出力されるコミット結果行（Issue #3940）。
+# 例: ``[fix/issue-123-x abc1234] test: refs #123`` /
+# ``[main (root-commit) abc1234] initial``。``tool_response`` に exit_code キーが
+# 無いため、この行の有無を成功判定に使う（``_handle_gh_pr_create()`` の PR URL 判定と同じ流儀）。
+_COMMIT_RESULT_LINE_RE = re.compile(
+    r"^\[\S+(?:\s+\(root-commit\))?\s+[0-9a-f]{4,40}\]", re.MULTILINE
+)
+
+# コミット対象ファイルがテスト資材か判定する（Issue #3940）。`tests/` 配下（サブディレクトリ
+# 含む）は step_defs も内包するため個別判定は不要。`.feature` は `tests/` 配下に置かれない
+# ケースを想定し拡張子でも判定する。
+_TEST_ASSET_PATH_RE = re.compile(r"(?:^|/)tests/")
+
+# pytest 起動コマンドを検知する（Issue #3940）。`pytest ...` / `uv run [--project ...] pytest`
+# / `.venv/bin/pytest` / `python -m pytest`（"pytest" トークンとして一致）を拾う。
+# 直後に `-`（`pytest-cov` 等のパッケージ名の一部）が続く場合は誤検知として除外する。
+_PYTEST_INVOKE_RE = re.compile(r"(?:^|[\s&|;\n])(?:\S*/)?pytest(?=$|[\s])")
 
 #: ``gh pr view <N> --json createdAt`` のタイムアウト（#3552）。
 _GH_PR_VIEW_TIMEOUT_SECONDS = 10.0
@@ -263,6 +309,8 @@ def _fetch_pr_created_at(pr_num: int) -> tuple[str, str]:
             ["gh", "pr", "view", str(pr_num), "--json", "createdAt"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_GH_PR_VIEW_TIMEOUT_SECONDS,
             check=False,
         )
@@ -445,29 +493,122 @@ def _handle_gh_issue_create_sub_issue(command: str, payload: dict[str, Any]) -> 
     )
 
 
-def _handle_bash(payload: dict[str, Any]) -> int:
-    """PostToolUse[Bash]: worktree 作成 / gh pr create / gh issue edit・create の各成功を記録する.
+def _resolve_issue_via_branch(payload: dict[str, Any], command: str) -> int | None:
+    """現在のブランチ名（``issue-<N>`` 形式）から Issue 番号を解決する（Issue #3940）.
 
+    対象ディレクトリは ``resolve_target_cwd()``（コマンド内 ``cd``/``-C`` → payload の
+    ``cwd`` → プロセス CWD の優先順）で解決する。``git rev-parse`` 失敗時・ブランチ名が
+    ``issue-<N>`` 形式でない場合は None を返す。
+    """
+    cwd = _resolve_target_cwd(payload, command)
+    rc, out, _err = _run_git_in_repo(cwd, "rev-parse", "--abbrev-ref", "HEAD")
+    if rc != 0:
+        return None
+    return _extract_issue_number_from_branch(out.strip())
+
+
+def _git_show_name_only(cwd: str) -> list[str]:
+    """``git show --name-only --pretty=format: HEAD`` で直近コミットの変更ファイル一覧を返す（#3940）."""
+    rc, out, _err = _run_git_in_repo(
+        cwd, "show", "--name-only", "--pretty=format:", "HEAD"
+    )
+    if rc != 0:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def _classify_commit_files(files: list[str]) -> str | None:
+    """コミット対象ファイル一覧を ``"test"`` / ``"impl"`` に分類する（Issue #3940）.
+
+    全ファイルが ``tests/`` 配下（``step_defs`` を含む）または ``*.feature`` なら
+    ``"test"``。実装ファイルを 1 つでも含めば ``"impl"``。ファイルが 1 つもない
+    （空コミット等）場合は None を返す。
+    """
+    if not files:
+        return None
+    if all(_TEST_ASSET_PATH_RE.search(f) or f.endswith(".feature") for f in files):
+        return "test"
+    return "impl"
+
+
+def _handle_git_commit(command: str, payload: dict[str, Any]) -> int:
+    """``git commit`` 成功 → コミット内容に応じて test/impl の細粒度境界を記録する（Issue #3940）.
+
+    成功判定は ``interrupted`` に加え stdout のコミット結果行（``_COMMIT_RESULT_LINE_RE``）
+    の有無で行う。Issue 番号はコミットメッセージの closes/fixes/resolves/refs を優先し、
+    見つからなければ現在のブランチ名へフォールバックする（``_resolve_issue_via_branch``）。
+    1 Issue 内で繰り返し発生する境界のため、冪等スキップ（``_record()``）ではなく
+    ``_append_mark()`` で毎回追記する。
+    """
+    if not _is_bash_success(payload):
+        return 0
+    stdout = _get_tool_output(payload)
+    if not _COMMIT_RESULT_LINE_RE.search(stdout):
+        return 0
+    issues = _extract_closes_issues(command, pattern=_CLOSES_OR_REFS_RE)
+    issue_num = issues[0] if issues else _resolve_issue_via_branch(payload, command)
+    if issue_num is None:
+        return 0
+    cwd = _resolve_target_cwd(payload, command)
+    classification = _classify_commit_files(_git_show_name_only(cwd))
+    if classification is None:
+        return 0
+    step = (
+        "step2-test-committed" if classification == "test" else "step2-impl-committed"
+    )
+    _append_mark(issue_num, step, "record-timing-boundaries")
+    return 0
+
+
+def _handle_pytest_invoke(command: str, payload: dict[str, Any]) -> int:
+    """PreToolUse[Bash]: pytest 起動コマンドを検知して step2-test-run を記録する（Issue #3940）.
+
+    実行前（PreToolUse）に検知するため成否は問わない。Issue 番号は現在のブランチ名
+    （``issue-<N>`` 形式）から解決する。1 Issue 内で繰り返し発生する境界のため、
+    冪等スキップせず ``_append_mark()`` で毎回追記する。
+    """
+    if not _PYTEST_INVOKE_RE.search(command):
+        return 0
+    issue_num = _resolve_issue_via_branch(payload, command)
+    if issue_num is None:
+        return 0
+    _append_mark(issue_num, "step2-test-run", "record-timing-boundaries")
+    return 0
+
+
+def _handle_bash(payload: dict[str, Any]) -> int:
+    """Bash: worktree 作成 / gh pr create / gh issue edit・create / git commit の各成功、
+    および PreToolUse 時点の pytest 起動検知を記録する.
+
+    - PreToolUse[Bash] pytest 起動コマンド検知 → ``step2-test-run``（毎回追記・#3940）
     - ``git worktree add`` / ``tidd worktree-add`` 成功 → ``step2-branch-created``
+    - ``git commit`` 成功 → ``step2-test-committed`` / ``step2-impl-committed``
+      （コミット対象ファイルの分類に応じる・毎回追記・#3940）
     - ``gh pr create`` 成功 → ``step4-pr-created``
     - ``gh issue edit --add-label "🙋 needs-human-input"`` 成功 →
       ``step1.5-quality-check``（``meta.verdict="needs-human-input"``・#3817）
     - ``gh issue create --parent <N>`` 成功 → 親 Issue に ``step1.5-quality-check``
       （``meta.verdict="epic-split"``・#3817）
     """
+    command = get_command(payload)
+    if payload.get("hook_event_name") == "PreToolUse":
+        # pytest 起動検知は実行前（成否を問わない）に行う。他の Bash 経路は
+        # tool_response（stdout・interrupted）に依存するため PostToolUse 側でのみ扱う。
+        return _handle_pytest_invoke(command, payload)
     tool_response = payload.get("tool_response") or {}
     if not isinstance(tool_response, dict):
         return 0
     # 成功判定 (a): interrupted が真の場合は失敗扱い（_lib.hook_io へ集約・#3552）
     if not _is_bash_success(payload):
         return 0
-    command = get_command(payload)
     if _WORKTREE_ADD_CMD_RE.search(command):
         issue_num = _extract_issue_number_from_branch(command)
         if issue_num is not None:
             return _record(
                 issue_num, "step2-branch-created", "record-timing-boundaries"
             )
+    if _GIT_COMMIT_CMD_RE.search(command):
+        return _handle_git_commit(command, payload)
     if _is_gh_pr_create(command):
         return _handle_gh_pr_create(command, payload)
     if _is_gh_issue_edit(command):

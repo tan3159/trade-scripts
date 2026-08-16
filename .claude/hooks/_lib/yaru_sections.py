@@ -136,6 +136,8 @@ def _fetch_issue_via_gh(issue_number: int) -> dict[str, Any] | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=_ISSUE_VIEW_TIMEOUT_SEC,
         )

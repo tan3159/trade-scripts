@@ -77,6 +77,8 @@ def _is_tracked_in_git(path: Path) -> bool:
             cwd=str(target_dir),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=2,
         )

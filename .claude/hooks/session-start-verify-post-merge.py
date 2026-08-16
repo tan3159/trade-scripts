@@ -72,6 +72,8 @@ def _list_candidates() -> list[int] | None:
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
             check=False,
         )

@@ -82,7 +82,7 @@ tidd issue-next-state queue     # 残キュー（空白区切り）を表示
 
 **CRITICAL: `🙋 needs-human-input` ラベルがついていても停止してはならない。無条件に着手する。** 単一番号指定はユーザーの明示的承認とみなす。Issue リスト取得は実行しない。STEP 1.5 へ進む。
 
-**CRITICAL: マージ完了・後処理（worktree 削除・ブランチ削除・main sync）が完了するまで turn を終了してはならない。** state を更新しながら STEP を進める（`require-issue-next-completion.py` Stop hook が in-progress state を検出して継続を強制する。Issue #2321）。**CRITICAL: issue-next 実行中は一般規約「明示的に求められない限りコミットしない」より継続契約が優先される（#3724）。** 実装・テスト・pre-flight 完了後はコミット許可が明示されなくてもコミット → push → PR作成まで進める（`require-issue-next-completion.py` が PR 未作成時の stop を exit 1 でブロック）。人間判断が必要な場合（`🙋 needs-human-input` = park）のみ停止し、単なるコミット・push・PR作成未実施を人間待ちとして扱わない。**`init` の前に `🔧 in-progress` ラベルの有無を確認する（多重着手防止・Issue #2804）。** 手順・exit 1 時のエスカレーション文言は [`in-progress-label-check.md`](./in-progress-label-check.md) を読んで実行する。exit 0 の場合のみ以下を実行する:
+**CRITICAL: マージ完了・後処理（worktree 削除・ブランチ削除・main sync）が完了するまで turn を終了してはならない。** state を更新しながら STEP を進める（`require-issue-next-completion.py` Stop hook が in-progress state を検出して継続を強制する。Issue #2321）。**CRITICAL: issue-next 実行中は一般規約「明示的に求められない限りコミットしない」より継続契約が優先される（#3724）。** 実装・テスト・pre-flight 完了後はコミット許可が明示されなくてもコミット → push → PR作成まで進める（`require-issue-next-completion.py` が PR 未作成時の stop を exit 2 でブロック・#3846）。人間判断が必要な場合（`🙋 needs-human-input` = park）のみ停止し、単なるコミット・push・PR作成未実施を人間待ちとして扱わない。**`init` の前に `🔧 in-progress` ラベルの有無を確認する（多重着手防止・Issue #2804）。** 手順・exit 1 時のエスカレーション文言は [`in-progress-label-check.md`](./in-progress-label-check.md) を読んで実行する。exit 0 の場合のみ以下を実行する:
 
 ```bash
 tidd issue-next-state migrate

@@ -33,6 +33,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.git_helpers import git_toplevel
@@ -41,6 +42,25 @@ from _lib.tidd_uvx import build_uvx_tidd_cmd
 
 _NUM_RE = re.compile(r"^[1-9][0-9]*$")
 _DIGITS_RE = re.compile(r"^[0-9]+$")
+
+
+def _detach_kwargs() -> dict[str, Any]:
+    """バックグラウンド起動プロセスを親から切り離す Popen kwargs を返す.
+
+    Issue #3919: `start_new_session=True` は Windows では例外にならず黙って
+    無視される（プロセスグループが作られないため切り離しの前提が崩れる）。
+    #3897 で `.claude/hooks/_lib/gh_cache.py` に導入した Windows 向け代替手段
+    （`creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`）と同様の
+    対応をここでも使う。
+    """
+    if sys.platform == "win32":
+        return {
+            "creationflags": (
+                subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+                | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            )
+        }
+    return {"start_new_session": True}
 
 
 def main() -> int:
@@ -174,6 +194,8 @@ def main() -> int:
                 check=False,
                 timeout=600,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if result.returncode != 0 and result.stderr:
                 sys.stderr.write(result.stderr)
@@ -187,7 +209,7 @@ def main() -> int:
                 stdout=subprocess.DEVNULL,
                 stderr=None,  # 親プロセスの stderr を継承
                 stdin=subprocess.DEVNULL,
-                start_new_session=True,
+                **_detach_kwargs(),
             )
         else:
             # nohup 相当: 親と切り離してバックグラウンド起動（本体 uv run --project 経路）
@@ -196,7 +218,7 @@ def main() -> int:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                start_new_session=True,
+                **_detach_kwargs(),
             )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         pass

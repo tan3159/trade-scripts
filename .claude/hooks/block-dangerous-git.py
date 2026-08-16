@@ -43,7 +43,13 @@ def _gh_json(args: list[str]) -> str | None:
     """gh コマンドを実行して stdout（JSON or 値）を返す。失敗時は None."""
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=15
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=15,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
@@ -187,6 +193,8 @@ def _check_branch_delete_safe(normalized: str) -> bool:
             ["tidd", "cleanup-merged-branch", "--check-only", "--", branch_name],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=20,
         )

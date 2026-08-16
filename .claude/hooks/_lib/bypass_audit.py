@@ -69,6 +69,8 @@ def _get_current_pr_number() -> int | None:
             ["gh", "pr", "view", "--json", "number", "--jq", ".number"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=5,
         )

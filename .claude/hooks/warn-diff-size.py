@@ -50,6 +50,8 @@ def _git_diff_numstat_total(repo_root: str) -> int | None:
             cwd=repo_root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )

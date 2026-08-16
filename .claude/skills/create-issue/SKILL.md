@@ -7,6 +7,13 @@ description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成�
 
 # /create-issue
 
+Codex では `agent_type` と `task_name` の両方を指定する。role registry に登録されている
+ことを確認する。`fork_turns` は省略し、初期
+message は自己完結させる。custom role が registry にない場合は、stderr に
+`issue_writer` と Codex 再起動・`.codex/agents/` 再読込手順を表示し、STEP 3 の明示定義を
+付けた default agent を 1 回だけ再試行する。再試行も失敗したら空の静的テンプレートへ
+フォールバックせず、原因を表示して終了する（対応表: `docs/reference/codex-interop.md` §6-5）。
+
 Issue 本文生成 skill。Claude Code の Agent tool で `issue-writer` subagent を起動し、
 `.claude/rules/issue-creation.md` のフォーマット規約に沿った Markdown 本文を組み立てる。
 
@@ -55,7 +62,7 @@ gh issue list --state open --label "priority: low" --limit 100 --json number | j
 以下のプロンプトで Agent tool を呼ぶ。STEP 2 で取得した分布を `priority_distribution` として渡す:
 
 ```
-Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_writer", task_name="issue_writer", message=...) に読み替え
+Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_writer", task_name="issue_writer", message=<自己完結した生成指示>) に読み替え。fork_turns は省略
   subagent_type="issue-writer",
   description="Issue 本文生成",
   prompt=<type / title-short / context / priority_distribution を含むプロンプト>
@@ -82,6 +89,21 @@ subagent は `.claude/agents/issue-writer.md` の `output_format` に従い次�
   "labels": ["type: fix", "priority: medium"]
 }
 ```
+
+### Codex availability failure contract
+
+Codex の tool result が `issue_writer` の role unavailable / registry 未登録を示した場合は、
+stderr に不足している role 名と「Codex を再起動して `.codex/agents/` を再読込する」手順を
+出力する。同じ message に次の定義を明示し、default agent を 1 回だけ再試行する。
+
+```
+役割: issue_writer。context から title/body/labels の JSON を生成する。
+必須: ## 背景、## やること（チェックボックス）、fix/feat は ## 振る舞い。
+出力: JSON のみ（title: string, body: string, labels: string[]）。
+```
+
+再試行にも失敗した場合は Issue を起票せず、原因と再実行方法を表示して終了する。
+空の静的テンプレートを返して原因を隠してはならない。
 
 ### STEP 4: 静的品質検証
 
@@ -144,11 +166,12 @@ create-issue: 未知の type '{type}'。有効値: feat/fix/docs/refactor/build/
 ### subagent 呼び出し失敗
 
 Agent tool が subagent 起動に失敗した場合（例: `.claude/agents/issue-writer.md` が存在しない・
-プロンプトが長すぎる等）、以下のフォールバックを実行する:
+プロンプトが長すぎる等）、Codex では availability failure contract に従い default agent を
+1 回だけ再試行する。再試行後も失敗した場合は以下を表示して終了する:
 
 1. STDERR にエラーメッセージを表示
-2. 静的テンプレート（`## 背景` / `## やること` の空欄形式）で Issue 本文を生成
-3. ユーザーに手動で本文を埋めてもらう旨を表示して終了
+2. 不足している role 名と再読込手順
+3. Issue は起票せず、再実行方法
 
 ### priority 分布取得失敗（STEP 2）
 

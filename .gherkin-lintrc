@@ -1,0 +1,20 @@
+{
+  "no-empty-file": "on",
+  "no-files-without-scenarios": "on",
+  "no-unnamed-features": "on",
+  "no-unnamed-scenarios": "on",
+  "no-duplicate-tags": "on",
+  "no-trailing-spaces": "on",
+  "indentation": [
+    "on",
+    {
+      "Feature": 0,
+      "Scenario": 2,
+      "Step": 4,
+      "Examples": 2,
+      "example": 4
+    }
+  ],
+  "no-multiple-empty-lines": "on",
+  "no-scenario-outlines-without-examples": "on"
+}
