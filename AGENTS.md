@@ -64,7 +64,7 @@ Codex の 32KiB 上限（`project_doc_max_bytes`）へ波及する。
 # Issue作成ルール
 
 hookとAgy（`/issue-review`）の両方から参照される単一の真実源。
-詳細（合格例・source分類・priority判定・Gherkin品質・prose-only検討）は `docs/reference/issue-creation-guide.md` 参照。
+詳細（合格例・source分類・priority判定・Gherkin品質・prose-only検討）は ai-dev-handbook 本体の docs/reference/ 配下・`issue-creation-guide.md`（consumer 未配布）参照。
 
 ---
 
@@ -79,7 +79,7 @@ hookとAgy（`/issue-review`）の両方から参照される単一の真実源�
 - `source:`: `type: fix` のみ: `ci`/`rework`/`human-report`/`new-bug`/`spec-change`
 
 **粒度:** 1 PR 完結。**ドキュメント更新:** `docs/`・`CLAUDE.md` の更新が `## やること` に含まれるか。
-**方針整合性:** `docs/decisions/`・`docs/conventions.md` と矛盾しないか。依存関係は GitHub ネイティブの `blocked-by`（依存先 Issue 番号）で表明でき、未解決の blocker がある Issue は `/issue-next-all` の自動選定から除外される（#3640）。依存理由はコメントに記載（合否不問）。
+**方針整合性:** ai-dev-handbook 本体の docs/ 配下（`decisions/`・`conventions.md`。consumer 未配布）と矛盾しないか。依存関係は GitHub ネイティブの `blocked-by`（依存先 Issue 番号）で表明でき、未解決の blocker がある Issue は `/issue-next-all` の自動選定から除外される（#3640）。依存理由はコメントに記載（合否不問）。
 
 ---
 
@@ -116,6 +116,6 @@ hookとAgy（`/issue-review`）の両方から参照される単一の真実源�
 
 ## 関連ドキュメント
 
-- `docs/reference/issue-creation-guide.md` — 詳細ガイド
-- `docs/conventions.md` — 規約
-- `docs/reference/hooks.md` — Hooks リファレンス
+- ai-dev-handbook 本体の docs/reference/ 配下・`issue-creation-guide.md`（consumer 未配布） — 詳細ガイド
+- ai-dev-handbook 本体の docs/ 配下・`conventions.md`（consumer 未配布） — 規約
+- ai-dev-handbook 本体の docs/reference/ 配下・`hooks.md`（consumer 未配布） — Hooks リファレンス
