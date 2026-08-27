@@ -1040,6 +1040,7 @@ def main(pr_num: str, attempt: int, stop_before_merge: bool = False) -> int:
     if early_exit is not None:
         return early_exit
 
+    # codeql[py/clear-text-logging]: repo/backend are non-secret identifiers; no token is logged.
     print(
         f"==> AI レビュー開始: PR #{pr_num} ({repo}) [試行 {attempt}] [バックエンド: {backend}]",
         file=sys.stderr,

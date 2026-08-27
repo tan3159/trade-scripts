@@ -1106,6 +1106,8 @@ def run_custom_review(
     api_key = os.environ.get(api_key_env)
     if not api_key:
         reason = f"環境変数 {api_key_env}（custom-backend.api-key-env が指す変数）が未設定です"
+        # codeql[py/clear-text-logging]: reason contains only the environment variable name,
+        # never the secret value itself.
         print(f"ERROR: {reason}", file=sys.stderr)
         return BackendResult(
             output="", exit_code=3, backend_name=backend_label, failure_kind="permanent", failure_reason=reason
