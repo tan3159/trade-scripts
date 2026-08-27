@@ -1,5 +1,7 @@
 # TradeScripts
 
+@docs/personal/user/CLAUDE.md
+
 <!-- BEGIN: repo-specific -->
 <!--
 このマーカー内はプロジェクト固有です。`copier update` では上書きされません。
