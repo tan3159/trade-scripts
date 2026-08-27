@@ -71,7 +71,7 @@ issue-implementer を起動せずフローが終わるため、従来は SKILL.m
 （``_handle_issue_write()``/``_handle_sub_issue_write()``）は、settings.json の
 matcher エントリ自体が既に削除済みで到達不能なため #3817 で撤去した
 （後方互換として残す選択肢も検討したが、GitHub MCP 廃止決定
-`docs/decisions/2026-08-14-abolish-github-mcp.md` により MCP 復活の予定はなく、
+上流リポジトリ本体の docs/decisions/ 配下・`2026-08-14-abolish-github-mcp.md`（consumer 未配布） により MCP 復活の予定はなく、
 呼び出し不能なコードを残す保守コストに見合わないため削除を選んだ）。
 
 **#3558:** ``ai-confirm-verifier`` / ``issue-fixer`` の prompt は ``PR番号: <PR番号>``

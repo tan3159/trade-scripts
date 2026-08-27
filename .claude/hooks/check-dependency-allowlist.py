@@ -5,6 +5,10 @@ pyproject.toml の dependencies / optional-dependencies の変更を検知し、
 `.claude/rules/dependency-allowlist.yaml` に含まれていないパッケージ名を検出した場合に
 exit 2 でブロックして人間承認（allowlist への追加 PR）へ誘導する。
 
+consumer 固有の追記は base ファイルではなく `.claude/rules/local/dependency-allowlist.yaml`
+（local overlay・Issue #4086）に置く。テンプレート配布物に存在しないため
+copier update で上書きされず、hook は base と overlay をマージして照合する。
+
 対象:
   - Edit / Write tool で pyproject.toml を変更する場合:
     [project] dependencies / [project.optional-dependencies] に
@@ -24,6 +28,7 @@ stdlib のみ使用（hook は stdlib のみ前提）。
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -41,8 +46,24 @@ from _lib.hook_io import (
 
 # ── allowlist YAML パス ────────────────────────────────────────────────────────
 
-_ALLOWLIST_PATH = (
-    Path(__file__).resolve().parent.parent / "rules" / "dependency-allowlist.yaml"
+# テスト等で実パスを上書きできるよう env 指定を許容する（Issue #4086）
+_ALLOWLIST_PATH = Path(
+    os.environ.get("TIDD_ALLOWLIST_PATH")
+    or str(
+        Path(__file__).resolve().parent.parent / "rules" / "dependency-allowlist.yaml"
+    )
+)
+
+# consumer 専用 local overlay。テンプレート配布物に存在しないため
+# copier update で上書きされない（Issue #4086）。
+_LOCAL_ALLOWLIST_PATH = Path(
+    os.environ.get("TIDD_ALLOWLIST_LOCAL_PATH")
+    or str(
+        Path(__file__).resolve().parent.parent
+        / "rules"
+        / "local"
+        / "dependency-allowlist.yaml"
+    )
 )
 
 # ── パッケージ名抽出パターン ──────────────────────────────────────────────────
@@ -99,23 +120,27 @@ def _normalize_pkg_name(name: str) -> str:
     return re.sub(r"[-_.]", "-", name.lower())
 
 
-def _load_allowlist() -> frozenset[str]:
-    """allowlist YAML を読み込んで正規化済みパッケージ名セットを返す.
+def _load_allowlist_file(path: Path, *, missing_ok: bool = False) -> frozenset[str]:
+    """allowlist YAML 1 ファイルを読み込んで正規化済みパッケージ名セットを返す.
 
     stdlib のみで YAML を簡易パースする（PyYAML は hook 環境で利用可能だが
     hook の stdlib 制約の可能性を考慮してまず stdlib で試みる）。
     hook の同一プロセス内では PyYAML が利用可能なため PyYAML を試み、
     import 失敗時は簡易パーサーにフォールバックする。
+
+    missing_ok=True の場合、ファイルが存在しなければ warning を出さず空セットを返す
+    （consumer 専用 overlay は任意ファイルのため）。
     """
-    if not _ALLOWLIST_PATH.is_file():
-        # allowlist ファイルが存在しない場合はブロックしない（設定不備を見逃さない安全側）
-        sys.stderr.write(
-            f"WARN: dependency-allowlist.yaml が見つかりません: {_ALLOWLIST_PATH}\n"
-            "hook を no-op として扱います。allowlist ファイルを作成してください。\n"
-        )
+    if not path.is_file():
+        if not missing_ok:
+            # allowlist ファイルが存在しない場合はブロックしない（設定不備を見逃さない安全側）
+            sys.stderr.write(
+                f"WARN: dependency-allowlist.yaml が見つかりません: {path}\n"
+                "hook を no-op として扱います。allowlist ファイルを作成してください。\n"
+            )
         return frozenset()
 
-    content = _ALLOWLIST_PATH.read_text(encoding="utf-8")
+    content = path.read_text(encoding="utf-8")
 
     # PyYAML が利用可能なら使う
     try:
@@ -151,6 +176,21 @@ def _load_allowlist() -> frozenset[str]:
                 in_packages = False
 
     return frozenset(_normalize_pkg_name(p) for p in packages_std if p)
+
+
+def _load_allowlist() -> frozenset[str]:
+    """base + consumer 専用 local overlay をマージした allowlist を返す（Issue #4086）.
+
+    base ファイル（`.claude/rules/dependency-allowlist.yaml`）が存在しない場合は
+    従来どおり warning を出して空セットを返し、hook を no-op にする（overlay だけで
+    有効化しない）。consumer 固有の追記は `.claude/rules/local/dependency-allowlist.yaml`
+    に置くことで copier update から保護される。
+    """
+    base = _load_allowlist_file(_ALLOWLIST_PATH)
+    if not base:
+        return frozenset()
+    local = _load_allowlist_file(_LOCAL_ALLOWLIST_PATH, missing_ok=True)
+    return base | local
 
 
 def _extract_packages_from_toml_content(content: str) -> list[str]:
@@ -351,7 +391,7 @@ def _main() -> int:
             "  2. `.claude/rules/dependency-allowlist.yaml` にパッケージ名を追加する PR を作成する\n"
             "  3. allowlist への追加 PR のレビュー後、依存追加 PR を作成する\n"
             "\n"
-            "詳細: docs/reference/hooks.md#check-dependency-allowlistpy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#check-dependency-allowlistpy`（consumer 未配布）\n"
         )
         return 2
 
@@ -380,7 +420,7 @@ def _main() -> int:
             "  2. `.claude/rules/dependency-allowlist.yaml` にパッケージ名を追加する PR を作成する\n"
             "  3. allowlist への追加 PR のレビュー後、uv add を実行する\n"
             "\n"
-            "詳細: docs/reference/hooks.md#check-dependency-allowlistpy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#check-dependency-allowlistpy`（consumer 未配布）\n"
         )
         return 2
 

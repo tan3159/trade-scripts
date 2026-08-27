@@ -13,7 +13,7 @@ description: 前回セッションの状況（cache/brief.md）と 🙋 needs-hu
 2. 続けて、以下のコマンドを実行して 🙋 needs-human-input 滞留キューを表示する:
 
 ```bash
-tidd human-queue --limit 5
+uv run --project projects/py/tidd_tools tidd human-queue --limit 5
 ```
 
 ## 出力形式

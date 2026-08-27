@@ -118,7 +118,7 @@ def check_reference_depth(content: str, file_path: str) -> list[str]:
             errors.append(
                 f"参照は 1 階層以内に保ってください。\n"
                 f"SKILL.md → {ref_link} → {nested_refs[0]} は 2 階層の参照になります。\n"
-                f"詳細: docs/reference/skill-authoring-rules.md"
+                f"詳細: 上流リポジトリ本体の docs/reference/ 配下・`skill-authoring-rules.md`（consumer 未配布）"
             )
             break
 
@@ -140,7 +140,7 @@ def check_skill_md(content: str, file_path: str) -> list[str]:
         errors.append(
             f"SKILL.md body が 500 行を超えています（現在: {body_line_count} 行）。\n"
             f"Progressive Disclosure パターンで分割してください。\n"
-            f"詳細: docs/reference/skill-authoring-rules.md"
+            f"詳細: 上流リポジトリ本体の docs/reference/ 配下・`skill-authoring-rules.md`（consumer 未配布）"
         )
 
     name = fm.get("name", "")
@@ -190,7 +190,7 @@ def check_subfile(content: str) -> list[str]:
         errors.append(
             f"100 行を超えるサブファイルには TOC（目次）が必要です（現在: {line_count} 行）。\n"
             "先頭近くに `## Contents` または `## 目次` 見出しを追加してください。\n"
-            "詳細: docs/reference/skill-authoring-rules.md"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`skill-authoring-rules.md`（consumer 未配布）"
         )
 
     return errors

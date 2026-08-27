@@ -163,5 +163,5 @@ JSON のみで応答してください:
 - `.claude/rules/issue-creation.md` — 詳細な判定基準
 - `.claude/skills/issue-review/SKILL.md` — 呼び出し元 skill
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- `docs/decisions/2026-08-03-diff-size-early-warning-layers.md` — A+C 採用・誤検知緩和策の決定経緯
+- ai-dev-handbook 本体の docs/decisions/ 配下・`2026-08-03-diff-size-early-warning-layers.md`（consumer 未配布） — A+C 採用・誤検知緩和策の決定経緯
 '''

@@ -35,7 +35,7 @@ EXCLUDE_BASENAMES: tuple[str, ...] = (
     "bootstrap.sh",
     "ai-review-repo-config.sh",
     "ai-review-repo-config.toml",
-    # #3683: 配布物（notify-copier-staleness.py / tidd_uvx.py / hook_io.py /
+    # #3683: 配布物（notify-copier-staleness.py / hook_io.py /
     # block-unauthorized-fallback-review.py / state_dir.py / validate-skill.py /
     # notify-template-sync.py / hardcoded-patterns.yaml）は上流固有文字列を
     # `_src_path`（`.copier-answers.yml`）へ局所化したため、検出対象に戻っている。

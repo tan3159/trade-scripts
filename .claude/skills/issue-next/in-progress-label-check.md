@@ -1,6 +1,6 @@
 # STEP 1: `🔧 in-progress` ラベルによる多重着手防止（Issue #2804）
 
-`/issue-next` の STEP 1（単一番号指定・バッチモード）で `tidd issue-next-state init` を呼ぶ前に実行する事前チェック。
+`/issue-next` の STEP 1（単一番号指定・バッチモード）で `uv run --project projects/py/tidd_tools tidd issue-next-state init` を呼ぶ前に実行する事前チェック。
 liveness ファイル（`liveness-check.md` 記載の生存確認）とは別レイヤーの多重着手防止であり、ラベルは liveness の生死判定に依存しない。
 
 ## バッチモード
@@ -8,7 +8,7 @@ liveness ファイル（`liveness-check.md` 記載の生存確認）とは別レ
 anchor 番号（例: 42、キュー: 43 44）に対して:
 
 ```bash
-tidd check-in-progress-label 42  # exit 0=ラベルなし（着手可能） / exit 1=ラベルあり
+uv run --project projects/py/tidd_tools tidd check-in-progress-label 42  # exit 0=ラベルなし（着手可能） / exit 1=ラベルあり
 ```
 
 exit 1 の場合は `init` を実行せず、残りキュー番号（今回取り出した anchor 番号を含む）を明示したうえで下記の選択肢形式で報告して停止する:
@@ -27,7 +27,7 @@ exit 0 の場合のみ SKILL.md STEP 1 の `init` 手順（状態ファイル永
 ## 単一番号指定
 
 ```bash
-tidd check-in-progress-label <Issue番号>  # exit 0=ラベルなし（着手可能） / exit 1=ラベルあり
+uv run --project projects/py/tidd_tools tidd check-in-progress-label <Issue番号>  # exit 0=ラベルなし（着手可能） / exit 1=ラベルあり
 ```
 
 exit 1 の場合は `init` を実行せず、下記の選択肢形式で報告して停止する:

@@ -43,4 +43,8 @@ PUBLISH_DEFAULT_SCOPE = "tan3159@gmail.com"
 # CircleCI
 # CIRCLECI_TOKEN = "token_xxx..."
 
+# custom backend（OpenAI 互換 API・tidd propose-step 用）
+# 詳細: ai-dev-handbook 本体の docs/reference/ 配下・`review-backends-guide.md`（consumer 未配布・api-key-env: CUSTOM_LLM_API_KEY）
+# CUSTOM_LLM_API_KEY = "xxx..."
+
 # 詳細: docs/setup/secrets-management.md

@@ -44,7 +44,7 @@
     last-run.json のスキーマ・既存の呼び出し元は変更しない（`_write_last_run` 内部で
     条件付きに追記するのみ）。
 
-hook 失敗原則（`docs/reference/hooks.md` §失敗原則 参照）:
+hook 失敗原則（上流リポジトリ本体の docs/reference/ 配下・`hooks.md`（consumer 未配布）の §失敗原則 参照）:
   - **stderr にログ + exit 2 を必ず返す**
   - **silent success（常時 exit 0）は禁止**
 
@@ -192,6 +192,45 @@ def _pr_number_for_branch(branch: str) -> str | None:
     if number is None:
         return None
     return str(number)
+
+
+def _branch_for_cwd(cwd: str) -> str | None:
+    """指定された worktree の現在ブランチを返す."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+
+def _is_stop_payload(payload: dict[str, Any]) -> bool:
+    """Stop hook payload を判定する（Codex では tool_name が存在しない）."""
+    return "tool_name" not in payload and (
+        "stop_hook_active" in payload or payload.get("hook_event_name") == "Stop"
+    )
+
+
+def _handle_stop(payload: dict[str, Any]) -> int:
+    """Codex の Stop 経路で現在の worktree の open PR にラベルを付与する."""
+    cwd = resolve_target_cwd(payload)
+    branch = _branch_for_cwd(cwd)
+    if not branch or branch.split("/", 1)[0] not in _BRANCH_TO_LABEL:
+        return 0
+    pr_number = _pr_number_for_branch(branch)
+    if pr_number is None:
+        return 0
+    return _apply_labels_for_pr(pr_number)
 
 
 def _fetch_pr_number_by_branch(payload: dict[str, Any] | None = None) -> str | None:
@@ -686,11 +725,11 @@ def _apply_labels_for_pr(pr_number: str) -> int:
             applied_labels.append(size_label)
         else:
             # Issue #1445: size ラベル失敗も exit 2 に格上げして silent 経路を除去。
-            # size/XX ラベル未作成の環境では docs/reference/pr-size-labels.md の手順で
+            # size/XX ラベル未作成の環境では 上流リポジトリ本体の docs/reference/ 配下・`pr-size-labels.md`（consumer 未配布） の手順で
             # 事前作成が必要（GitHub Actions ワークフローで対応済み想定）。
             sys.stderr.write(
                 f"label-pr.py: gh label add failed: size ラベル付与に失敗しました: {detail}"
-                f"（size/XX ラベルが未作成の可能性があります。docs/reference/pr-size-labels.md 参照）\n"
+                f"（size/XX ラベルが未作成の可能性があります。上流リポジトリ本体の docs/reference/ 配下・`pr-size-labels.md`（consumer 未配布） 参照）\n"
             )
             failure_details.append(f"size: {detail}")
             exit_code = 2
@@ -767,7 +806,9 @@ def _handle_mcp_create_pr(payload: dict[str, Any]) -> int:
 
 
 def _main() -> int:
-    payload = read_hook_input(hook_name="PostToolUse")  # Issue #1364
+    payload = read_hook_input(hook_name=None)  # Issue #1364; Stop payload は別 schema
+    if _is_stop_payload(payload):
+        return _handle_stop(payload)
     tool_name = get_tool_name(payload)
 
     if tool_name == _MCP_CREATE_PR_TOOL:

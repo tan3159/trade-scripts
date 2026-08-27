@@ -1,9 +1,9 @@
 # issue-fixer リトライ時の Opus 動的エスカレーション（Issue #2803）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` STEP 5「リトライループ（issue-fixer 委譲）」で issue-fixer subagent を呼び出す際、
-retry attempt（直前に実行した `tidd ai-review <PR番号> <試行回数>` の `<試行回数>` の値）に応じて
+retry attempt（直前に実行した `uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>` の `<試行回数>` の値）に応じて
 `model` パラメータの要否を判定する。
 
 ## 判定分岐
@@ -55,11 +55,11 @@ STEP 2 の issue-implementer 初回呼び出しは本エスカレーション対
   Opus は Sonnet より単価が高いため、手戻り回数が多い PR ほどコスト増分が大きくなるが、
   対象は「実際にレビュー指摘が繰り返された PR」に限定されるため、#2451 が懸念した
   「Opus 継承によるコスト予測不能な全面膨張」は再燃しない
-- **判定コスト:** retry attempt の値は既存の `tidd ai-review <PR番号> <試行回数>` 呼び出し引数を
+- **判定コスト:** retry attempt の値は既存の `uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>` 呼び出し引数を
   そのまま参照するため、追加の状態管理・分類 subagent 起動などのオーバーヘッドは発生しない
 
 ## 関連
 
-- `docs/decisions/2026-07-23-issue-implementer-fixer-model-sonnet.md`「追記（Issue #2803）」節
-- `docs/reference/issue-next-loop-operations.md`「(h.2)」
-- `docs/reference/subagent-design-guide.md`「model は明示指定必須」
+- ai-dev-handbook 本体の docs/decisions/ 配下・`2026-07-23-issue-implementer-fixer-model-sonnet.md`（consumer 未配布）「追記（Issue #2803）」節
+- ai-dev-handbook 本体の docs/reference/ 配下・`issue-next-loop-operations.md`（consumer 未配布）「(h.2)」
+- ai-dev-handbook 本体の docs/reference/ 配下・`subagent-design-guide.md`（consumer 未配布）「model は明示指定必須」

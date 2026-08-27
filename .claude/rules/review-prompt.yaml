@@ -104,6 +104,14 @@ attempt_cycle_rules:
         - "もっとエラーケースの Scenario を書くべき"
         - "Then 句が不十分"
         - "異常系 Scenario を追加してください"
+      exclusions:
+        # Issue #4065: PR #4023 で「ゲートバイパス退行がテスト未検出のまま残っている」
+        # という指摘が、抽象的な「もっと Scenario を書くべき」要求と混同されて
+        # ダウングレードされないようにする。
+        - >
+          テストカバレッジ欠落の指摘が、実際に通過する具体的な攻撃ベクトル・
+          回避経路（bypass）を diff から実証している場合は gherkin_cosmetic の対象外。
+          抽象的に「もっと Scenario を書くべき」と要求するだけの指摘のみを対象とする。
 
     - id: pain_format_nitpick
       description: >
@@ -120,6 +128,14 @@ attempt_cycle_rules:
       examples:
         - "docs/reference に書かれた X が見つからない"
         - "CLAUDE.md の記述と実装が食い違っている"
+      exclusions:
+        # Issue #4065: PR #4006 で「ドキュメントが『理由は必須』と明記しているのに
+        # 実装がそれを検証していない」という機能的な矛盾（escape hatch 空理由バイパス）が
+        # 表記揺れの doc drift と混同されてダウングレードされないようにする。
+        - >
+          grep で確認した結果、ドキュメントに明記された振る舞い（検証条件・必須項目等）を
+          実装が実際に満たしていない（機能的な矛盾）と判明した場合は doc_drift_unverified
+          の対象外とし HIGH のまま扱う。アンカー名・表記揺れなど文言のみの差異に限定する。
 
     - id: cosmetic_typo
       description: >
@@ -136,6 +152,15 @@ attempt_cycle_rules:
       examples:
         - "ここで IOError をキャッチしていない"
         - "ネットワーク障害が起きたら困る"
+      exclusions:
+        # Issue #4065: PR #3963 で `_post_bats_commit_status` が対になる関数と同じ
+        # 例外を catch していない、という現実に到達可能な指摘が「思弁的な例外懸念」と
+        # 混同されてダウングレードされないようにする。
+        - >
+          実際の呼び出し元で例外処理が欠落しているケースはspeculative_exceptionの対象外。
+          既存の対になる実装（同種の呼び出し元）で既に catch されている例外型を、
+          もう一方の呼び出し元が catch していないなど、現実に到達可能な runtime path を
+          示せる場合は HIGH のまま扱う。
 
     - id: anchor_link_mismatch
       description: >
@@ -206,3 +231,36 @@ security_checklist:
       examples:
         - "subprocess.run(cmd, check=False)  # エラーを無視"
         - "requests.get(url, verify=False)"
+
+# バイパスマーカー一覧（Issue #4147）
+#
+# `<!-- allow-xxx: <理由> -->` 系の PR ボディ HTML コメントは、本リポジトリの hook が
+# 「特定のチェックを意図的にバイパスしてよい」という人間の判断を記録するための正規の
+# 仕組みである。`sanitize_untrusted_text()`（Issue #1845）はプロンプトインジェクション
+# 対策として HTML コメントを丸ごと除去するため、レビュープロンプトの他セクションでは
+# これらのマーカーの理由文が見えない。マーカーが実際に PR ボディへ存在するかどうかは、
+# 別途 `## PR バイパスマーカーの検出結果` セクション（sanitize 前テキストを機械的に
+# 走査した結果）に記載される。このセクションはあくまで「どんなマーカーが存在しうるか」の
+# 用語集であり、このPR個別の判定ではない。
+bypass_markers:
+  glossary:
+    - id: allow-no-issue-id
+      role: Issue に紐付かない PR（依存更新・merge commit 等）でタイトルの Issue 番号必須チェックを bypass する。
+    - id: allow-no-closes
+      role: PR 本文に `closes #N` が無くてもよいと明示する。
+    - id: allow-single-commit
+      role: RED→GREEN のテスト/実装コミット分割が不可能な正当理由がある場合に単一コミットを許可する。
+    - id: allow-test-update
+      role: 既存の保護済みテストファイルの更新を許可する（実体との乖離修正等）。
+    - id: allow-test-skip
+      role: テストの一時的なスキップを理由付きで許可する。
+    - id: allow-secret-pattern
+      role: 秘密情報検知の false positive を理由付きでバイパスする。
+    - id: allow-ai-confirm-keyword
+      role: "[AI確認] キーワードの誤用検知 warning を抑制する。"
+    - id: allow-xxl
+      role: diff サイズゲート（1000 行超）・PR サイズ分割要求を理由付きでバイパスする（旧名 allow-large-pr）。
+    # 注意（Issue #4152 レビュー指摘）: `no-doc-update` は `pre_flight.py` が
+    # コミットメッセージから読むマーカーであり、本用語集（PR ボディマーカー）には
+    # 含めない。含めると `## PR バイパスマーカーの検出結果`（PR body のみ走査）が
+    # 「なし」と表示する一方でこの用語集には載る、という矛盾した prompt になる。

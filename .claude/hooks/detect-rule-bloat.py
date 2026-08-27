@@ -123,7 +123,7 @@ def _check_line_count(file_path: str) -> str | None:
         return (
             f"WARN: rules/{name} が {LINE_LIMIT} 行を超えています。垂直分割を検討してください。\n"
             f"（現在: {line_count} 行 / 上限: {LINE_LIMIT} 行）\n"
-            "詳細: docs/reference/pr-splitting-guide.md の「Phase 内垂直分割の判断基準」を参照"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`pr-splitting-guide.md`（consumer 未配布） の「Phase 内垂直分割の判断基準」を参照"
         )
     return None
 

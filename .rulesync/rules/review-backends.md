@@ -8,7 +8,7 @@ targets:
 agy / codex / Claude フォールバックの選択基準・exit code 対応・マージ gate。
 
 **関連:** [`.claude/rules/workflow.md`](./workflow.md)
-**詳細:** docs/reference/review-backends-guide.md
+**詳細:** ai-dev-handbook 本体の docs/reference/ 配下・`review-backends-guide.md`（consumer 未配布）
 
 ---
 
@@ -58,7 +58,7 @@ APPROVE 後に `closes #N` の Issue `## やること` に prefix なし未消�
 ## scope-diff チェック（#2597）
 
 APPROVE パスで Issue やること・振る舞いと PR diff を突き合わせ、スコープ超過・未消化の可能性を非ブロッキング PR コメントで指摘する。escape hatch: `AI_REVIEW_SKIP_SCOPE_DIFF=1`。
-詳細: docs/reference/review-backends-guide.md
+詳細: ai-dev-handbook 本体の docs/reference/ 配下・`review-backends-guide.md`（consumer 未配布）
 
 ---
 
@@ -72,6 +72,6 @@ APPROVE パスで Issue やること・振る舞いと PR diff を突き合わ�
 
 ## 関連ドキュメント
 
-- docs/reference/review-backends-guide.md — 詳細（手順・research）
-- docs/setup/codex-setup.md — codex セットアップ
-- docs/setup/ai-review-credentials.md — 認証情報
+- ai-dev-handbook 本体の docs/reference/ 配下・`review-backends-guide.md`（consumer 未配布） — 詳細（手順・research）
+- ai-dev-handbook 本体の docs/setup/ 配下・`codex-setup.md`（consumer 未配布） — codex セットアップ
+- ai-dev-handbook 本体の docs/setup/ 配下・`ai-review-credentials.md`（consumer 未配布） — 認証情報

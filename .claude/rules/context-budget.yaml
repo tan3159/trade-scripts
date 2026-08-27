@@ -9,10 +9,20 @@
 # 2026-08-11 実測合計 ≈ 11.78k・最大単体 ≈ 1.59k（overview.md）を切り上げて再設定:
 # total_warn 10000→12000・total_hard 11000→13000・file_warn 1500→1700・file_hard 1600→1800。
 # overview.md は per-file HARD（1.8k）を下回るため本文圧縮は行わない（#3643 スコープ外）。
-# 肥大して 1.8k を超えそうになったら別 Issue で圧縮を検討する。
+# 肥大して 1.8k を超えそうになったら別 Issue で圧縮を検討する（この判断基準は #4013 で無効）。
+# #4013: #3770（Codex 向け AGENTS.md の詳細ルールを常時ロードから分離する）で
+# overview.md に説明段落が追加された際、閾値のラチェット再calibrationが行われず、
+# 配布テンプレート（templates/workflow/.rulesync/rules/overview.md.jinja）自身が
+# 実測 ≈1.99k で file_hard（1.8k）を超過し、copier copy 直後の consumer で
+# tidd pre-flight がブロックされる不整合が生じていた（consumer 側の追加が原因ではない）。
+# 本体自身の .rulesync/rules/overview.md も実測 ≈2.21k と更に大きいため、両者を下回らない
+# 切り上げ値へ再設定: file_warn 1700→2150・file_hard 1800→2300。
+# overview.md は新 per-file HARD（2.3k）を下回るため本文圧縮は行わない（#3643 スコープ外）。
+# 肥大して 2.3k を超えそうになったら別 Issue で圧縮を検討する。
+# 決定記録: docs/decisions/2026-08-18-context-budget-file-hard-recalibration.md
 # 更新手順: docs/reference/context-budget.md / 決定記録: docs/decisions/2026-07-10-context-token-budget.md
 total_warn: 12000
-file_warn: 1700
+file_warn: 2150
 # メモリ予算 WARN 閾値（SessionStart hook session-start-memory-warn・Issue #3659）
 # ~/.claude/projects/<repo変換名>/memory/MEMORY.md の est tokens 超過を stdout に WARN する。
 # MEMORY.md は AutoMem が自動生成し PR 差分に現れないため HARD gate（PR gate）には載せない
@@ -22,4 +32,4 @@ file_warn: 1700
 memory_total_warn: 2400
 # HARD 閾値（tidd context-budget --check / test-plan PR gate が exit 1 でブロック）
 total_hard: 13000
-file_hard: 1800
+file_hard: 2300

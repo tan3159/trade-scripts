@@ -263,7 +263,7 @@ def _main() -> int:
         "  - .md / .txt 拡張子の編集（メインチェックアウトでも許可）\n"
         "  - メインチェックアウトが main 以外のブランチの場合\n"
         "\n"
-        "詳細: docs/reference/hooks.md#require-worktree-for-editpy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-worktree-for-editpy`（consumer 未配布）\n"
     )
     return 2
 

@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.hook_io import get_command, is_hook_enabled, read_hook_input
 from _lib.shell_parse import split_shell_fragments
 
-DETAIL = "詳細: docs/reference/hooks.md#block-background-ai-reviewpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#block-background-ai-reviewpy`（consumer 未配布）\n"
 
 # `tidd ai-review` / `python -m tidd_tools ai-review`（uv run 経由含む）。
 # block-subagent-review-merge.py と同一の正規表現（#3403 の誤検知防止適用済み）。
@@ -59,12 +59,28 @@ def _has_nohup_prefix(fragment: str) -> bool:
     return bool(_NOHUP_PREFIX_RE.search(fragment))
 
 
+def _is_fd_dup_ampersand(fragment: str, i: int) -> bool:
+    r"""i 番目の `&` がファイルディスクリプタ複製構文の一部か判定する（Issue #4179）.
+
+    `2>&1`（出力の複製）・`1>&2`（逆方向）・`>&2`（fd 省略）・`2>&-`（クローズ）等、
+    直前の非クォート文字が `>`/`<` で直後が数字または `-` の `&` は、
+    バックグラウンド化演算子ではなくシェルのファイルディスクリプタ複製構文である。
+    """
+    if i == 0 or fragment[i - 1] not in (">", "<"):
+        return False
+    if i + 1 >= len(fragment):
+        return False
+    nxt = fragment[i + 1]
+    return nxt.isdigit() or nxt == "-"
+
+
 def _has_single_ampersand(fragment: str) -> bool:
     r"""クォート外の単独 `&`（バックグラウンド化演算子）が断片内に存在するか判定する.
 
     - `&&` は該当しない（2 文字ともスキップする）
     - クォート（`'...'` / `"..."`）内の `&` は該当しない
     - クォート外のバックスラッシュエスケープ（`\&` 等）は該当しない
+    - ファイルディスクリプタ複製構文（`2>&1` 等）に含まれる `&` は該当しない（#4179）
 
     `split_shell_fragments()` が `&&` を区切りとして分割済みのため、断片内の
     `&&` は通常存在しないが、防御的にここでも扱う。
@@ -92,6 +108,9 @@ def _has_single_ampersand(fragment: str) -> bool:
         if c == "&":
             if fragment[i : i + 2] == "&&":
                 i += 2
+                continue
+            if _is_fd_dup_ampersand(fragment, i):
+                i += 1
                 continue
             return True
         i += 1

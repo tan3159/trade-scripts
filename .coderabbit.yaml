@@ -3,7 +3,7 @@
 # CodeRabbit は advisory review 専用。auto-merge gate は引き続き tidd ai-review
 # （`.claude/rules/review-backends.md`）が担い、本ファイルの指摘は
 # request_changes_workflow: false によりブロッキング化しない。
-# 導入手順（GitHub App install 等）: docs/setup/copier-workflow-adoption.md
+# 導入手順（GitHub App install 等）: ai-dev-handbook 本体の docs/setup/ 配下・copier-workflow-adoption.md（consumer 未配布）
 # yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
 language: "ja-JP"
 # tone_instructions: レビューコメント・要約・説明文はすべて日本語で書く（#2413）

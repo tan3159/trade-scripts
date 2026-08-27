@@ -1,6 +1,6 @@
 # agy クォータ上限時の Claude フォールバック（STEP 5 詳細）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` の STEP 5 詳細フロー。`uv run --project projects/py/tidd_tools tidd ai-review` が **exit code 3** を返した場合のみ読む。
 
@@ -60,7 +60,7 @@ subagent は JSON `{"verdict": "APPROVE|REQUEST_CHANGES", "issues": [...], "rati
 
 ```bash
 # subagent の JSON を /tmp/agent-review-<PR番号>.json に保存済みとする
-# `tidd` と同じ venv の python を使う（インストール方法に依らず tidd_tools が import できる）
+# `uv run --project projects/py/tidd_tools tidd` と同じ venv の python を使う（インストール方法に依らず tidd_tools が import できる）
 # readlink -f は macOS 標準の readlink（BSD 版）が非対応のため python の realpath で解決する
 "$(dirname "$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$(command -v tidd)")")/python" -c '
 import json, sys
@@ -101,8 +101,8 @@ printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/tidd/ai-reviewer/pr-<
 
 `--continue-with-verdict` が内部で PR コメント投稿（`_post_comment_with_app_token()`）と reviewdog inline コメント投稿を行う。コメント投稿は `--continue-with-verdict` に一本化し、`--post-comment` を別途呼び出してはならない（二重投稿になる）。
 
-- APPROVE → `tidd ai-review --continue-with-verdict APPROVE <PR番号>` → STEP 6
-- REQUEST_CHANGES → `tidd ai-review --continue-with-verdict REQUEST_CHANGES <PR番号>` を実行してコメントを投稿する → 修正して push し、試行回数をインクリメントして再実行
+- APPROVE → `uv run --project projects/py/tidd_tools tidd ai-review --continue-with-verdict APPROVE <PR番号>` → STEP 6
+- REQUEST_CHANGES → `uv run --project projects/py/tidd_tools tidd ai-review --continue-with-verdict REQUEST_CHANGES <PR番号>` を実行してコメントを投稿する → 修正して push し、試行回数をインクリメントして再実行
 - Agent tool が利用できない場合（subagent 起動失敗等）→ 下記の失敗記録後に人間エスカレーション
 
 ## fallback 自体が失敗した時の loop-error 記録（Issue #1750）
@@ -118,7 +118,7 @@ printf 'claude-code:claude-sonnet-4-6\n' > "${HOME}/.cache/tidd/ai-reviewer/pr-<
 4. `--continue-with-verdict` 内のコメント投稿に失敗した（GitHub API エラー・token 期限切れ等）
 
 ```bash
-tidd loop-error-log \
+uv run --project projects/py/tidd_tools tidd loop-error-log \
   --pr <PR番号> \
   --step ai-review:fallback-failed \
   --error "<失敗の 1 行サマリー>" \

@@ -42,28 +42,29 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc  # 次回以降のシ�
 **注:** `mise` を使わずに uv 単体で Python バージョンを解決する。`uv`/`uvx` 実行時に必要な Python が自動で
 downloads される。
 
-### 2. tidd の実行（uvx ゼロインストール実行方式）
+### 2. tidd の実行（vendor 配布方式）
 
-このドキュメントの対象は **copier で生成した consumer 自身のリポジトリ**であり、`projects/py/tidd_tools` は存在しない。`tidd` コマンドはマシンごとの永続インストール（`uv tool install`）を行わず、`uvx --from <git spec> tidd <subcommand>` で毎回リモートから解決して実行する（`copier-workflow-adoption.md` §3 と同じ方式・`uvx` は `uv` に同梱されているため追加インストール不要）。
-
-`<owner>/<repo>` と `<ref>` は `.copier-answers.yml` の `_src_path` / `_commit` が示す上流リポジトリの値。tidd を必要とする hook はこの spec を `_src_path` から自動解決するため、手動実行時のみ埋める。
+このドキュメントの対象は **copier で生成した consumer 自身のリポジトリ**。`copier copy` /
+`copier update` が `projects/py/tidd_tools/`（`src/` と `pyproject.toml`）を consumer へ
+vendor 配布する（#3979）ため、`tidd` コマンドは `uv run --project projects/py/tidd_tools
+tidd <subcommand>` で実行時にリモートアクセスせずローカル解決する（`copier-workflow-adoption.md`
+§3 と同じ方式。旧 uvx ゼロインストール実行方式は #3983/#3984 で撤去済み）。
 
 ```bash
-uvx --from "git+https://github.com/<owner>/<repo>@<ref>#subdirectory=projects/py/tidd_tools" tidd --help
+uv run --project projects/py/tidd_tools tidd --help
 ```
 
-日付タグでバージョン固定する場合（推奨）は `@main` を `@v<YYYY.MM.DD>` に置き換える。
-
-毎回 `--from` の spec 全体を明示する必要があるため、頻用する場合はシェル alias を設定すると便利:
+頻用する場合はシェル alias を設定すると便利（consumer リポジトリのルートで実行する前提のため、
+他ディレクトリで使う場合は `--project` に絶対パスを指定する）:
 
 ```bash
-alias tidd='uvx --from "git+https://github.com/<owner>/<repo>@<ref>#subdirectory=projects/py/tidd_tools" tidd'
+alias tidd='uv run --project projects/py/tidd_tools tidd'
 ```
 
 **動作確認:**
 
 ```bash
-uvx --from "git+https://github.com/<owner>/<repo>@<ref>#subdirectory=projects/py/tidd_tools" tidd --help
+uv run --project projects/py/tidd_tools tidd --help
 ```
 
 サブコマンド一覧が表示されれば OK。
@@ -148,7 +149,7 @@ GH_TOKEN = "<GitHub Personal Access Token または App installation token>"
 > **⚠️ セキュリティ原則（CLAUDE.md）**: 機密情報を Claude / AI エージェントに直接見せる操作を誘導してはならない。
 
 - 詳細: `ai-review-credentials.md`
-- 実装: `projects/py/tidd_tools/src/tidd_tools/shared/secrets.py`（`get_secret()`。上流リポジトリ本体のみに存在し consumer には配布されない）
+- 実装: `projects/py/tidd_tools/src/tidd_tools/shared/secrets.py`（`get_secret()`。#3979 以降は consumer にも vendor 配布される）
 
 ### D. dotfiles 同期は手動
 
@@ -173,7 +174,7 @@ chezmoi は「複数マシンで dotfiles を synchronize したい」場合の�
 
 ## トラブルシュート
 
-### `uvx --from ... tidd` が失敗する
+### `uv run --project projects/py/tidd_tools tidd` が失敗する
 
 ```bash
 # Python バージョン確認
@@ -181,7 +182,7 @@ python3 --version  # 3.11 以上必要
 
 # uv 経由で明示的にダウンロード
 uv python install 3.11
-uvx --from "git+https://github.com/<owner>/<repo>@<ref>#subdirectory=projects/py/tidd_tools" --python 3.11 tidd --help
+uv run --project projects/py/tidd_tools --python 3.11 tidd --help
 ```
 
 ### `gh auth login` で SSO 要求される場合

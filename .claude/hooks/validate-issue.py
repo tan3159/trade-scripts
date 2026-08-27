@@ -343,7 +343,7 @@ def _validate_gh_fragment(gh_fragment: str) -> list[str]:
             "      Then 期待結果（例: exit code 0 で終了する）\n\n"
             "  例外: やることが .claude/hooks/ のみの hook 契約系 Issue は Gherkin 不要。\n"
             "  代わりに test_*.py 契約テストを書いてください。\n"
-            "  詳細: docs/reference/hooks.md#validate-issuepy"
+            "  詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#validate-issuepy`（consumer 未配布）"
         )
 
     # やること チェックボックス形式
@@ -966,7 +966,9 @@ def _main_impl() -> int:
         for err in all_errors:
             sys.stderr.write(f"  - {err}\n")
         sys.stderr.write("\n修正して再実行してください。\n")
-        sys.stderr.write("詳細: docs/reference/hooks.md#validate-issuepy\n")
+        sys.stderr.write(
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#validate-issuepy`（consumer 未配布）\n"
+        )
         return 2
 
     return 0

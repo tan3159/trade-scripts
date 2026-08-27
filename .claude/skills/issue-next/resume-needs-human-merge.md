@@ -1,8 +1,8 @@
 # needs-human-merge PR resume フロー（引数なしモード事前チェック）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
-`tidd resume-candidates` が PR 番号を stdout に出力した場合（候補あり）、新規 Issue 選定より先に本フローを実行する。
+`uv run --project projects/py/tidd_tools tidd resume-candidates` が PR 番号を stdout に出力した場合（候補あり）、新規 Issue 選定より先に本フローを実行する。
 
 ## 目次
 
@@ -16,7 +16,7 @@
 引数なしモードの STEP 1 冒頭（Issue 選定前）で、PR 数上限チェック（check-pr-conflicts --count-only）の前に実行する。
 
 ```bash
-candidates=$(tidd resume-candidates)
+candidates=$(uv run --project projects/py/tidd_tools tidd resume-candidates)
 # exit code は常に 0。stdout が空または「候補なし」で始まる場合はスキップ
 ```
 
@@ -24,7 +24,7 @@ stdout に `#<数字>` が含まれる場合 → resume フローへ進む。
 
 ## 前提: consensus 不一致 PR の除外（Issue #2655）
 
-`tidd resume-candidates` は `needs-human-merge` PR のうち、consensus 不一致で停止した PR を自動的に除外して出力する。
+`uv run --project projects/py/tidd_tools tidd resume-candidates` は `needs-human-merge` PR のうち、consensus 不一致で停止した PR を自動的に除外して出力する。
 具体的には、`~/.cache/tidd/ai-reviewer/pr-<N>/consensus.json` の `verdict` が `REQUEST_CHANGES` である PR は resume 対象外として stderr にメッセージを出力し、stdout には含めない。
 
 | consensus.json の状態 | resume 候補か |
@@ -55,10 +55,10 @@ gh issue view N --json body
 ```
 
 Issue `## やること` の各チェックボックスを確認する:
-- **未消化あり（`- [ ]`）:** `tidd tick-evidence <PR番号>` で evidence を取得し、証跡付き tick + エビデンスコメントを投稿する
+- **未消化あり（`- [ ]`）:** `uv run --project projects/py/tidd_tools tidd tick-evidence <PR番号>` で evidence を取得し、証跡付き tick + エビデンスコメントを投稿する
 - **全消化済み（すべて `- [x]`）:** そのままマージ判断へ
 
-証跡検証で `tidd tick-evidence` が evidence を提供できない項目がある場合は以下の判断フローへ。
+証跡検証で `uv run --project projects/py/tidd_tools tidd tick-evidence` が evidence を提供できない項目がある場合は以下の判断フローへ。
 
 ### 3. マージ判断
 
@@ -106,8 +106,8 @@ needs-human-merge PR #<N> の resume をスキップして次の Issue を選定
 
 ## 設計根拠
 
-- `tidd resume-candidates` は `needs-human-merge` ラベルのオープン PR を照会するだけのシンプルな照会。CI には影響しない
+- `uv run --project projects/py/tidd_tools tidd resume-candidates` は `needs-human-merge` ラベルのオープン PR を照会するだけのシンプルな照会。CI には影響しない
 - resume フローは引数なしモードの事前チェックとして PR 上限チェック前に挟む（上限を先に確認してしまうと resume 候補 PR がカウントされて上限誤超と判定されるリスクがある）
-- 証跡検証は既存の `tidd tick-evidence` を再利用する（新規機能なし）
+- 証跡検証は既存の `uv run --project projects/py/tidd_tools tidd tick-evidence` を再利用する（新規機能なし）
 
-詳細仕様: `docs/reference/issue-next-loop-operations.md#needs-human-merge-resume`
+詳細仕様: ai-dev-handbook 本体の docs/reference/ 配下・`issue-next-loop-operations.md`（consumer 未配布・`#needs-human-merge-resume`節）

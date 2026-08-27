@@ -367,9 +367,15 @@ _SAFETY_HOOKS: frozenset[str] = frozenset(
 #: （実測: 2026-08-14）。この hook のみ既存の _SAFETY_HOOKS（破壊的操作の安全ガード）
 #: とは意味合いが異なるため、無効化時の「安全系 hook」WARN 対象には含めない
 #: （`is_safety` とは別に判定する）。
+#:
+#: `stamp-schedule-wakeup`（Issue #4050）も同じ理由で default ON にする。
+#: `require-issue-next-completion.py` の ScheduleWakeup 待機共存機能（#4050）は本 hook が
+#: 記録する `cache/schedule-wakeup/session-<id>.json` に依存するため、config.json 未設定でも
+#: 動作しないと待機時間が尊重されない高頻度ループ（Issue #4048 実測）が再発する。
 _DEFAULT_ON_HOOKS: frozenset[str] = frozenset(
     {
         "stamp-issue-next-session",
+        "stamp-schedule-wakeup",
     }
 )
 
@@ -1081,6 +1087,51 @@ def has_timing_event(issue_key: str, step: str) -> bool:
     except (OSError, sqlite3.Error):
         return False
     return row is not None
+
+
+def get_latest_timing_event_meta(issue_key: str, step: str) -> dict[str, Any] | None:
+    """統一日誌の ``issue_key``/``step`` に一致する最新イベントの ``meta`` を返す（Issue #3993）.
+
+    ``has_timing_event()`` と同じ repo フィルタ方針（存在すれば絞り込み・fail-open）を
+    踏襲する。DB 不在・読み込み失敗・meta が不正 JSON の場合は None（安全側）。
+    複数件ヒットする場合は ``id`` 降順（最新）の 1 件を返す。
+    """
+    db = get_timing_db_path()
+    if not db.is_file():
+        return None
+
+    def _query() -> Any:
+        con = sqlite3.connect(str(db), timeout=3.0)
+        try:
+            columns = {
+                row[1] for row in con.execute("PRAGMA table_info(events)").fetchall()
+            }
+            current_repo = get_current_repo() if "repo" in columns else None
+            if current_repo is None:
+                return con.execute(
+                    "SELECT meta FROM events WHERE issue_key = ? AND step = ?"
+                    " ORDER BY id DESC LIMIT 1",
+                    (issue_key, step),
+                ).fetchone()
+            return con.execute(
+                "SELECT meta FROM events WHERE issue_key = ? AND step = ?"
+                " AND (repo = ? OR repo IS NULL) ORDER BY id DESC LIMIT 1",
+                (issue_key, step, current_repo),
+            ).fetchone()
+        finally:
+            con.close()
+
+    try:
+        row = _run_sqlite_with_retry(_query)
+    except (OSError, sqlite3.Error):
+        return None
+    if row is None:
+        return None
+    try:
+        meta = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return meta if isinstance(meta, dict) else None
 
 
 def append_timing_event(

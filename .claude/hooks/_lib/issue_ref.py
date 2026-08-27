@@ -6,9 +6,9 @@
 微妙に異なる状態になっていた。本モジュールへ一本化する。
 
 **tidd_tools 側との関係:** ``.claude/hooks/`` は stdlib のみで動作し tidd_tools の venv を
-import できないため（hook は ``uvx`` でサブプロセス起動する経路しか持たない）、tidd_tools 側の
-正 ``projects/py/tidd_tools/src/tidd_tools/shared/branch_ref.py`` とは意図的に別モジュールに
-分離している（プロセス境界による重複であり、統合しない）。
+import できないため（hook は ``uv run --project`` でサブプロセス起動する経路しか持たない）、
+tidd_tools 側の正 ``projects/py/tidd_tools/src/tidd_tools/shared/branch_ref.py`` とは意図的に
+別モジュールに分離している（プロセス境界による重複であり、統合しない）。
 
 stdlib のみ使用。
 """

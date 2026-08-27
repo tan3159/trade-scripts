@@ -61,4 +61,4 @@ model: haiku
 
 - `.claude/skills/ai-review/SKILL.md` — 呼び出し元 skill
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- `docs/reference/ai-review-skill.md` — 詳細ドキュメント
+- ai-dev-handbook 本体の docs/reference/ 配下・`ai-review-skill.md`（consumer 未配布） — 詳細ドキュメント

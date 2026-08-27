@@ -23,7 +23,15 @@
       "Bash(printenv*)",
       "Bash(set*)",
       "Bash(export -p*)",
-      "Bash(declare -x*)"
+      "Bash(declare -x*)",
+      "Bash(bash -c *)",
+      "Bash(sh -c *)",
+      "Bash(sudo bash*)",
+      "Bash(cat*.env*)",
+      "Bash(cat*.envrc*)",
+      "Bash(cat*.mise.toml*)",
+      "Bash(cat*private-key.pem*)",
+      "Bash(cat*credentials.json*)"
     ],
     "allow": [
       "Bash(tidd cleanup-merged-branch*)"
@@ -54,11 +62,19 @@
           },
           {
             "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/require-split-consideration.py\"); fi"
+          },
+          {
+            "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/block-unauthorized-fallback-review.py\"); fi"
           },
           {
             "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/record-timing-boundaries.py\"); fi"
+          },
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/require-ai-reviewer-worktree-path.py\"); fi"
           }
         ]
       },
@@ -80,6 +96,10 @@
           {
             "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/block-subagent-review-merge.py\"); fi"
+          },
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/block-subagent-size-marker.py\"); fi"
           },
           {
             "type": "command",
@@ -144,6 +164,10 @@
           {
             "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/require-merge-ci-status.py\"); fi"
+          },
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/require-pr-state-drift-check.py\"); fi"
           },
           {
             "type": "command",
@@ -254,6 +278,15 @@
         ]
       },
       {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/stamp-schedule-wakeup.py\"); fi"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
@@ -290,6 +323,10 @@
           {
             "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/record-timing-boundaries.py\"); fi"
+          },
+          {
+            "type": "command",
+            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/label-pr.py\"); fi"
           }
         ]
       }
@@ -321,10 +358,6 @@
           {
             "type": "command",
             "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/session-start-verify-post-merge.py\"); fi"
-          },
-          {
-            "type": "command",
-            "command": "ROOT=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; if [ -n \"$ROOT\" ] && [ -d \"$ROOT\" ]; then cd \"$ROOT\" && (if python3 -c \"\" >/dev/null 2>&1; then PY=python3; elif python -c \"\" >/dev/null 2>&1; then PY=python; else echo \"ERROR: python3/python interpreter not found\" >&2; exit 2; fi; $PY \"$ROOT/.claude/hooks/sync-global-tidd-entrypoints.py\"); fi"
           }
         ]
       }

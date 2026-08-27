@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ from _lib.hook_io import get_command, get_hook_config, is_hook_enabled, read_hoo
 from _lib.shell_parse import split_shell_fragments as _split_shell_fragments
 from _lib.shell_parse import strip_heredoc_bodies as _strip_heredoc_bodies
 
-DETAIL = "詳細: docs/reference/hooks.md#block-dangerous-gitpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#block-dangerous-gitpy`（consumer 未配布）\n"
 
 
 def _git(*args: str) -> str | None:
@@ -38,6 +39,25 @@ def _git(*args: str) -> str | None:
     if result is None or result.returncode != 0:
         return None
     return result.stdout.strip()
+
+
+def _tidd_cleanup_command() -> list[str] | None:
+    """`tidd cleanup-merged-branch --check-only` の実行コマンド prefix を解決する（Issue #3984）.
+
+    `uv run --project <repo>/projects/py/tidd_tools tidd` に一本化する
+    （vendor 配布・Issue #3979 により consumer にも当該パスが存在する）。
+    `uv` が PATH に無い・repo root や `projects/py/tidd_tools` が解決できない場合は
+    None を返す（呼び出し側は内部実装へフォールバックする）。
+    """
+    if shutil.which("uv") is None:
+        return None
+    root = _git("rev-parse", "--show-toplevel")
+    if not root:
+        return None
+    tidd_project = Path(root) / "projects" / "py" / "tidd_tools"
+    if not tidd_project.is_dir():
+        return None
+    return ["uv", "run", "--project", str(tidd_project), "tidd"]
 
 
 def _gh_json(args: list[str]) -> str | None:
@@ -133,6 +153,60 @@ def _is_git_invocation(segment: str) -> bool:
     return bool(tokens) and tokens[0] == "git"
 
 
+# `<shell> -c '<command>'` のようにシェルを一段挟んで起動されるコマンドの
+# シェル名（Issue #3970）。パスプレフィックス（`/bin/bash` 等）は basename で判定する。
+_SHELL_WRAPPER_NAMES = {"bash", "sh", "zsh", "dash", "ksh", "ash"}
+
+
+def _shell_basename(token: str) -> str:
+    return token.rsplit("/", 1)[-1]
+
+
+# bash 等が受け付ける単一ダッシュの短縮オプション（`-lc` `-cl` `-ilc` 等）の中に
+# `-c` が含まれているかを判定する正規表現（Issue #3971 レビュー指摘）。
+# `--command` のような long option は対象外（先頭 `--` は除外）。
+_SHELL_C_FLAG_RE = re.compile(r"^-(?!-)[a-zA-Z]*c[a-zA-Z]*$")
+
+
+def _extract_shell_c_body(raw_segment: str) -> str | None:
+    """`<shell> -c '<command>'` 形式のセグメントから内側のコマンド文字列を取り出す（Issue #3970）.
+
+    `bash -c "git push --force"` のようにシェルを一段挟むと、セグメントの
+    先頭トークンが `bash` になり `_is_git_invocation` の対象から外れる
+    （素通りの脆弱性）。本関数は raw セグメント（引用符除去前）を `shlex.split`
+    でトークン化し、先頭トークンの basename がシェル名かつ `-c` フラグを
+    持つ場合に、その直後のトークン（クォート除去済みの内側コマンド文字列）を返す。
+    該当しない場合は None を返す。
+
+    `bash -lc "..."` のように `-c` が他の短縮オプション（`-l` 等）と結合した
+    トークン（`-lc` `-cl` 等）で渡されるケースも同様に検出する（Issue #3971
+    レビュー指摘: `-c` を独立トークンとしてのみ見ていたため `bash -lc` 形式が
+    素通りしていた）。
+
+    引用符が閉じていない等で `shlex.split` が例外を送出する場合は空白区切りへ
+    フォールバックする（`-c` の引数がクォート単位で取り出せないため、
+    結果的にシェルラッパーとして認識されないことがあるが、これは既存の
+    `_is_amend_invocation` と同じ fail-open の許容範囲とする）。
+    """
+    try:
+        tokens = shlex.split(raw_segment)
+    except ValueError:
+        tokens = raw_segment.split()
+    if len(tokens) < 3:
+        return None
+    if _shell_basename(tokens[0]) not in _SHELL_WRAPPER_NAMES:
+        return None
+    idx = next(
+        (i for i, tok in enumerate(tokens[1:], start=1) if _SHELL_C_FLAG_RE.match(tok)),
+        None,
+    )
+    if idx is None:
+        return None
+    if idx + 1 >= len(tokens):
+        return None
+    return tokens[idx + 1]
+
+
 def _filter_git_segments(command_for_check: str) -> str:
     """コマンド連結・パイプの各セグメントのうち、`git` を起動するものだけを残す（Issue #2795）.
 
@@ -148,13 +222,24 @@ def _filter_git_segments(command_for_check: str) -> str:
 
     分割は quote-aware な `_lib/shell_parse.split_shell_fragments` を使う
     （Issue #2966。naive な regex 分割はクォート内の区切り文字でも誤分割していた）。
+
+    `bash -c '<command>'` のようにシェルを一段挟んで起動されるセグメントは、
+    内側のコマンド文字列を取り出して再帰的に本関数へ渡し、ネストしたシェル
+    ラッパー（`bash -c 'bash -c "..."'` 等）や内側のコマンド連結も含めて
+    git セグメントを抽出する（Issue #3970）。
     """
     raw_segments = _split_shell_fragments(command_for_check)
-    git_segments = [
-        _normalize_segment(seg)
-        for seg in raw_segments
-        if _is_git_invocation(_normalize_segment(seg))
-    ]
+    git_segments: list[str] = []
+    for seg in raw_segments:
+        inner = _extract_shell_c_body(seg)
+        if inner is not None:
+            nested = _filter_git_segments(inner)
+            if nested:
+                git_segments.append(nested)
+            continue
+        normalized_seg = _normalize_segment(seg)
+        if _is_git_invocation(normalized_seg):
+            git_segments.append(normalized_seg)
     return " ".join(git_segments)
 
 
@@ -202,8 +287,8 @@ def _check_branch_delete_safe(normalized: str) -> bool:
 
     安全性判定ロジックの共有関数は `tidd_tools.cleanup_merged_branch.check_branch_delete_safe`
     に切り出した（#2370）。本関数は hook から呼ばれる薄いラッパーとして残す。
-    `tidd` コマンドが PATH 上にある場合は `tidd cleanup-merged-branch --check-only` に
-    委譲し、見つからない場合は内部実装にフォールバックする。
+    `uv run --project projects/py/tidd_tools tidd cleanup-merged-branch --check-only`
+    （Issue #3984）に委譲し、解決できない場合は内部実装にフォールバックする。
     """
     if _COMMAND_CHAIN_RE.search(_strip_leading_cd_prefix(normalized)):
         return False
@@ -220,21 +305,29 @@ def _check_branch_delete_safe(normalized: str) -> bool:
 
     branch_name = after_flag_tokens[0]
 
-    # tidd cleanup-merged-branch --check-only に委譲する（#2370）。
-    # tidd が見つからない場合は内部実装（キャッシュ優先）にフォールバック。
-    try:
-        result = subprocess.run(
-            ["tidd", "cleanup-merged-branch", "--check-only", "--", branch_name],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=20,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # tidd cleanup-merged-branch --check-only に委譲する（#2370・#3984）。
+    # 解決できない場合は内部実装（キャッシュ優先）にフォールバック。
+    cmd_prefix = _tidd_cleanup_command()
+    if cmd_prefix is not None:
+        try:
+            result = subprocess.run(
+                [
+                    *cmd_prefix,
+                    "cleanup-merged-branch",
+                    "--check-only",
+                    "--",
+                    branch_name,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=20,
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
     # フォールバック: tidd が見つからない場合は内部実装を使う。
     # キャッシュ（gh-cache.db）から PR 情報を取得し、miss 時は gh subprocess にフォールバック。

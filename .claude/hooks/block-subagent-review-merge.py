@@ -49,7 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.gh_command import is_gh_pr_merge
 from _lib.hook_io import get_command, is_hook_enabled, read_hook_input
 
-DETAIL = "詳細: docs/reference/hooks.md#block-subagent-review-mergepy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#block-subagent-review-mergepy`（consumer 未配布）\n"
 
 # issue-next（-all）自身は ai-review / gh pr merge の実行責務を持つ（#3436）。
 # Codex は task_name を snake_case（issue_next / issue_next_all）で渡すため、

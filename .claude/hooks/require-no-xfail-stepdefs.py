@@ -91,7 +91,9 @@ def _block_message(offending: list[str]) -> str:
     ]
     lines.extend(f"  {path}" for path in offending)
     lines.append("")
-    lines.append("詳細: docs/reference/hooks.md#require-no-xfail-stepdefspy")
+    lines.append(
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-no-xfail-stepdefspy`（consumer 未配布）"
+    )
     return "\n".join(lines) + "\n"
 
 

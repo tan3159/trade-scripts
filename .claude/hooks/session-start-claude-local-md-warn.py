@@ -120,7 +120,7 @@ def _check_local_md_files(repo_root: Path, warn_bytes: int, block_bytes: int) ->
             sys.stdout.write(
                 f"{_HOOK_NAME}: BLOCK: {name} が {size} bytes"
                 f"（{_BLOCK_BYTES_KEY} {block_bytes} 超過）。"
-                "参照時読み docs（例: docs/wsl-environment.md）への移行を推奨します。\n"
+                "参照時読み docs（例: docs/reference/screenshot-rules.md）への移行を推奨します。\n"
             )
         elif size > warn_bytes:
             sys.stdout.write(

@@ -29,32 +29,47 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _lib.hook_io import get_ai_reviewer_state_dir, is_hook_enabled, read_hook_input
-from _lib.tidd_uvx import build_uvx_tidd_cmd
+from _lib.git_helpers import git_toplevel
+from _lib.hook_io import (
+    get_ai_reviewer_state_dir,
+    is_hook_enabled,
+    read_hook_input,
+    resolve_target_cwd,
+)
 
-DETAIL = "詳細: docs/reference/hooks.md#block-unauthorized-fallback-reviewpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#block-unauthorized-fallback-reviewpy`（consumer 未配布）\n"
 
 _TARGET_AGENT = "ai_fallback_reviewer"
 _BACKEND_UNAVAILABLE_FLAG = "backend-unavailable"
 _PR_NUM_RE = re.compile(r"PR番号:\s*(\d+)")
 
 
-def _ai_review_guidance_command(pr_num: str) -> str:
-    """`tidd ai-review <PR> 1` の案内コマンド文字列を組み立てる（Issue #3405）.
+def _resolve_repo_root(payload: dict[str, Any]) -> Path:
+    """payload の cwd からリポジトリルートを解決する（PR #3989 レビュー指摘）.
 
-    handbook ローカルパス（`projects/py/tidd_tools`）を直書きせず、`_lib/tidd_uvx.py`
-    経由で uvx ゼロインストール実行方式のコマンドを組み立てる（consumer でも実行可能）。
+    `cwd` が repo 配下の subdir（例 `<repo>/docs`）でも案内コマンドが成立するよう、
+    `git rev-parse --show-toplevel` でルートへ正規化する（解決不能時は cwd を返す）。
     """
-    uvx_cmd = build_uvx_tidd_cmd("ai-review", pr_num, "1")
-    if uvx_cmd is None:
-        # uvx が PATH に無い環境向けフォールバック（PATH 導入済み tidd 前提）
-        return f"tidd ai-review {pr_num} 1"
-    return shlex.join(["uvx", *uvx_cmd[1:]])
+    cwd = resolve_target_cwd(payload)
+    root = git_toplevel(cwd=cwd, timeout=10)
+    return Path(root) if root else Path(cwd)
+
+
+def _ai_review_guidance_command(pr_num: str, repo_root: Path) -> str:
+    """`tidd ai-review <PR> 1` の案内コマンド文字列を組み立てる（Issue #3405・#3984）.
+
+    vendor 配布（Issue #3979）により consumer にも `projects/py/tidd_tools` が
+    存在する。PR #3989 レビュー指摘: repo 配下 subdir から起動した場合でも案内どおり
+    実行できるよう、`--project` はリポジトリルート基準の絶対パスで案内する
+    （相対パスだと `<subdir>/projects/py/tidd_tools` を探して失敗する）。
+    """
+    tidd_project = repo_root / "projects" / "py" / "tidd_tools"
+    return f"uv run --project {tidd_project} tidd ai-review {pr_num} 1"
 
 
 def _main() -> int:
@@ -101,7 +116,8 @@ def _main() -> int:
         f"Blocked: PR #{pr_num} の exit 3 証跡（backend-unavailable フラグ）が存在しません。\n"
         "ai-fallback-reviewer は `tidd ai-review` が exit 3（全バックエンド利用不可）を返した"
         "ときだけ起動できます。\n"
-        f"まず `{_ai_review_guidance_command(pr_num)}` を実行して exit 3 を確認してください。\n"
+        f"まず `{_ai_review_guidance_command(pr_num, _resolve_repo_root(payload))}` "
+        "を実行して exit 3 を確認してください。\n"
     )
     sys.stderr.write(DETAIL)
     return 2

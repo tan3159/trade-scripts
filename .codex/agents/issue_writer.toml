@@ -140,5 +140,5 @@ Feature: <機能名>
 - `.claude/rules/issue-creation.md` — 詳細な判定基準
 - `.claude/skills/create-issue/SKILL.md` — 呼び出し元 skill
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- `docs/reference/subagent-design-guide.md` — subagent 設計ガイド（並列化パターン含む）
+- ai-dev-handbook 本体の docs/reference/ 配下・`subagent-design-guide.md`（consumer 未配布） — subagent 設計ガイド（並列化パターン含む）
 '''

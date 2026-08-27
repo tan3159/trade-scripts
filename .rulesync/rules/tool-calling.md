@@ -47,4 +47,4 @@ targets:
 
 ---
 
-**詳細（agy 役割分担・structured output・テンプレート・効果測定）:** docs/reference/subagent-design-guide.md
+**詳細（agy 役割分担・structured output・テンプレート・効果測定）:** ai-dev-handbook 本体の docs/reference/ 配下・`subagent-design-guide.md`（consumer 未配布）

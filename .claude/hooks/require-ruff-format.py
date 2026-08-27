@@ -139,7 +139,7 @@ def _apply_ruff_format_and_commit(
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         sys.stderr.write(
             f"Blocked: require-ruff-format: ruff format の実行に失敗しました: {e}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -147,7 +147,7 @@ def _apply_ruff_format_and_commit(
         sys.stderr.write(
             "Blocked: require-ruff-format: ruff format が失敗しました。\n"
             f"{fmt_result.stderr}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -166,7 +166,7 @@ def _apply_ruff_format_and_commit(
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         sys.stderr.write(
             f"Blocked: require-ruff-format: ruff format --check (整形後確認) に失敗: {e}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -174,7 +174,7 @@ def _apply_ruff_format_and_commit(
         sys.stderr.write(
             "Blocked: require-ruff-format: ruff format 後も未整形ファイルが残っています。\n"
             f"{check_result.stderr}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -193,7 +193,7 @@ def _apply_ruff_format_and_commit(
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         sys.stderr.write(
             f"Blocked: require-ruff-format: git add に失敗しました: {e}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -222,7 +222,7 @@ def _apply_ruff_format_and_commit(
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         sys.stderr.write(
             f"Blocked: require-ruff-format: git commit に失敗しました: {e}\n"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 2
 
@@ -235,7 +235,7 @@ def _apply_ruff_format_and_commit(
     sys.stderr.write(
         f"require-ruff-format: ruff format 自動適用 + commit 完了。PR 作成を継続します。\n"
         f"  commit: {commit_msg!r}\n"
-        f"  詳細: docs/reference/hooks.md#require-ruff-formatpy\n"
+        f"  詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布）\n"
     )
     return 0
 
@@ -291,13 +291,13 @@ def _main() -> int:
     except FileNotFoundError:
         sys.stderr.write(
             "WARN: require-ruff-format: uv が見つからないため skip します。"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 0
     except subprocess.TimeoutExpired:
         sys.stderr.write(
             f"WARN: require-ruff-format: timeout ({_get_timeout_sec()}s) により skip します。"
-            " docs/reference/hooks.md#require-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布） 参照\n"
         )
         return 0
 
@@ -329,7 +329,9 @@ def _main() -> int:
             "  それでも失敗する場合は pyproject.toml の dev に ruff を追加してください\n"
         )
         sys.stderr.write("\n")
-        sys.stderr.write("詳細: docs/reference/hooks.md#require-ruff-formatpy\n")
+        sys.stderr.write(
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-ruff-formatpy`（consumer 未配布）\n"
+        )
         return 2
 
     # 非 0 exit = 未整形ファイル検出。.venv/bin/ruff で自動整形を試みる（Issue #1934）。

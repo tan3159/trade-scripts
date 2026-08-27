@@ -133,6 +133,24 @@ state ファイルを使って手動で worktree 作成（STEP 2）まで進め�
 超過の 2 条件のみで判定するよう変更した。worktree の有無にかかわらず、無関係な別
 セッションを誤ってブロックし続ける害の方が大きいと判断したため。
 
+**Issue #4050（ScheduleWakeup 待機との共存）:**
+
+Issue #3868 は「turn が終わるたびに本 hook が発火し同一警告が連続出力される」という
+症状（メッセージ縮小）のみに対応しており、`ScheduleWakeup` で指定した待機時間そのものが
+一切尊重されない根本原因は未解決だった。`/issue-next-all` 実行中に issue-implementer
+subagent の完了を `ScheduleWakeup(delaySeconds=1800, ...)` で待とうとしても、本 hook が
+無条件に exit 2 で turn 終了（sleep）をブロックしてしまい、指定した待機時間を待たずに
+直後の turn で即座に再ループする事象が観測された（Issue #4048・7 回以上連続呼び出しで
+実質待機なし）。
+
+対策として、`stamp-schedule-wakeup.py`（PostToolUse hook）が `ScheduleWakeup` 呼び出し
+直後に記録する `cache/schedule-wakeup/session-<session_id>.json`
+（`{"scheduled_at": ..., "delay_seconds": ...}`）を、自セッション所有・孤児判定の直後
+（gh 呼び出し・park 判定より前）に確認する。記録された `scheduled_at` から
+`delay_seconds` 未満の経過時間であれば、Stop を待機目的の正当な離脱とみなして
+ブロックしない（exit 0・直近ブロック時刻マーカーも更新しない）。記録が無い・待機時間を
+経過している場合は従来どおりの判定（park・PR 有無）を続行する。
+
 `config.json` で default OFF（`is_hook_enabled()` の非安全系 hook デフォルト）。
 stdlib のみ使用。git/gh subprocess 実行は `_lib/git_helpers.py` に委譲する。
 """
@@ -256,6 +274,54 @@ def _record_blocked_at(repo_root: str, issue_num: int, now: datetime) -> None:
         marker.write_text(now.strftime(_TIMESTAMP_FORMAT), encoding="utf-8")
     except OSError:
         pass
+
+
+def _schedule_wakeup_marker_path(repo_root: str, session_id: str) -> Path:
+    """`stamp-schedule-wakeup.py` が記録するマーカーのパスを返す（Issue #4050）."""
+    return Path(repo_root) / "cache" / "schedule-wakeup" / f"session-{session_id}.json"
+
+
+def _is_recent_schedule_wakeup_active(repo_root: str, session_id: str) -> bool:
+    """直前の `ScheduleWakeup` 呼び出しの待機時間内であれば True（Issue #4050）.
+
+    `stamp-schedule-wakeup.py` が記録した `scheduled_at`/`delay_seconds` から、現在時刻が
+    まだ待機時間内（`scheduled_at + delay_seconds` 未満）であれば True を返す。マーカー
+    無し・破損・`session_id` 不明・待機時間経過済みはすべて False（判定不能・期限切れは
+    従来どおりブロック方向に倒す。本 hook 全体のフェイルセーフ方針に合わせる）。
+    """
+    if not session_id:
+        return False
+    marker = _schedule_wakeup_marker_path(repo_root, session_id)
+    try:
+        raw = marker.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    scheduled_raw = data.get("scheduled_at")
+    if not isinstance(scheduled_raw, str) or not scheduled_raw:
+        return False
+    try:
+        scheduled_at = datetime.strptime(scheduled_raw, _TIMESTAMP_FORMAT).replace(
+            tzinfo=UTC
+        )
+    except ValueError:
+        return False
+    delay_raw = data.get("delay_seconds")
+    if delay_raw is None:
+        return False
+    try:
+        delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        return False
+    if delay_seconds <= 0:
+        return False
+    elapsed = (datetime.now(UTC) - scheduled_at).total_seconds()
+    return elapsed < delay_seconds
 
 
 def _iter_state_files(repo_root: str) -> list[Path]:
@@ -480,6 +546,12 @@ def _check_in_progress(
         # Issue #3943/#3951: session_id stamp 前クラッシュ・stamp 失敗による孤児 state は
         # ブロック対象から除外する（無関係な別セッションの Stop を永久ブロックしないため）。
         if _is_orphan_pre_session_state(data, orphan_grace_seconds):
+            continue
+
+        # Issue #4050: 直前の ScheduleWakeup 呼び出しの待機時間内であればブロックしない
+        # （待機目的の正当な Stop を離脱として誤ブロックしない。gh 呼び出し・park 判定・
+        # 直近ブロック時刻マーカーの更新より前に判定する）。
+        if _is_recent_schedule_wakeup_active(repo_root, own_session_id):
             continue
 
         # Issue #3868: 直近ブロックからウィンドウ内の連続ブロックかを判定する

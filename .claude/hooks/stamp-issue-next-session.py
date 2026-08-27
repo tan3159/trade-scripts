@@ -19,7 +19,7 @@ per-issue state ファイルへ書き込む。CLI サブプロセス自身は Cl
 照合し、不一致（別セッション発行）の state はブロック対象から除外する。session_id が
 記録されていない旧 state は後方互換として常にチェック対象にする。
 
-hook 失敗原則（`docs/reference/hooks.md` §失敗原則 参照）:
+hook 失敗原則（上流リポジトリ本体の docs/reference/ 配下・`hooks.md`（consumer 未配布）の §失敗原則 参照）:
   - 対象コマンドでない・session_id が取れない・state ファイルが存在しない等はすべて no-op（exit 0）
   - 記録の成否を stderr にログする（silent success だが可視化のためログは出す）
 

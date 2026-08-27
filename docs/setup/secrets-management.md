@@ -140,10 +140,10 @@ CircleCI の **Project Settings > Environment Variables** で登録する。
 steps:
   - run:
       name: Run ai-review
-      command: uvx --from "git+https://github.com/<owner>/<repo>@<ref>#subdirectory=projects/py/tidd_tools" tidd ai-review $PR_NUMBER 1
+      command: uv run --project projects/py/tidd_tools tidd ai-review $PR_NUMBER 1
 ```
 
-`tidd` コマンドは uvx ゼロインストール実行方式（`copier-workflow-adoption.md` §3 §3・#3087）で毎回リモートから解決して実行する。`uv tool install` によるマシンごとの永続インストールは行わない。`projects/py/tidd_tools` は 上流リポジトリ本体のみに存在し、consumer には配布されないため `uv run --project projects/py/tidd_tools` は使えない。
+`tidd` コマンドは `projects/py/tidd_tools/` に vendor 配布された tidd_tools（`copier-workflow-adoption.md` §3・#3979）を `uv run --project` でローカル実行する。`uv tool install` のようなマシンごとの永続インストールは行わない。旧 uvx ゼロインストール実行方式（#3087）は #3983/#3984 で撤去済み。
 
 ---
 

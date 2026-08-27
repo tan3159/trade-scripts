@@ -1,6 +1,6 @@
 # STEP 1.7: 既存 PR / 中断レビュー検知（Issue #1232）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` の STEP 1.7 詳細フロー。
 `closes #<N>` を含む open PR が存在する場合のみ読む。存在しない場合は STEP 2 へ進む。
@@ -33,14 +33,14 @@ Linux/WSL・macOS・Windows で `platformdirs` が返す OS 別のキャッシ�
 
 | 状態 | 条件 | 分岐先 |
 |------|------|--------|
-| `NO_CACHE` | cache dir が存在しない or 中身が空 | 通常の初回レビューフロー（STEP 5 で `tidd ai-review <PR> 1` を同期実行） |
+| `NO_CACHE` | cache dir が存在しない or 中身が空 | 通常の初回レビューフロー（STEP 5 で `uv run --project projects/py/tidd_tools tidd ai-review <PR> 1` を同期実行） |
 | `COMPLETED` | `verdict` センチネルファイルあり or `timing.json` のいずれかの行に `"verdict"` エントリあり | 現行フローに従う（人間マージ待ちなら報告して終了、REQUEST_CHANGES なら STEP 5 のリトライループ（issue-fixer 委譲）に従い修正） |
-| `INTERRUPTED` | 何らかのキャッシュはあるが `verdict` 観測手段（センチネル or timing.json）が無い | **中断検知**。同 PR で `tidd ai-review <PR> <試行回数>` を **同期再実行**して verdict を回収する |
+| `INTERRUPTED` | 何らかのキャッシュはあるが `verdict` 観測手段（センチネル or timing.json）が無い | **中断検知**。同 PR で `uv run --project projects/py/tidd_tools tidd ai-review <PR> <試行回数>` を **同期再実行**して verdict を回収する |
 
 ### 3. 中断レビュー再開時のブランチ切り替え
 
 `INTERRUPTED` を検知した場合、既存 PR の `headRefName` を取得して worktree を作り、
-その worktree 内で `tidd ai-review` を同期実行する。**新しいブランチは作らない。**
+その worktree 内で `uv run --project projects/py/tidd_tools tidd ai-review` を同期実行する。**新しいブランチは作らない。**
 
 Claude Code セッション内での手順:
 
@@ -53,13 +53,13 @@ Claude Code セッション内での手順:
 git fetch origin
 git worktree add "../<repo>-issue-<N>-resume" "origin/${_head_ref}"
 cd "../<repo>-issue-<N>-resume"
-tidd ai-review "$_pr_num" 1
+uv run --project projects/py/tidd_tools tidd ai-review "$_pr_num" 1
 ```
 
 その後は STEP 5 の終了コード分岐（0/1/2/3/4）に従う。
 
 ## CRITICAL
 
-- **`INTERRUPTED` を検知しても新しい PR を作らない。** 既存 PR に対して `tidd ai-review` を再実行するのが目的である
-- **AI review キャッシュディレクトリを手動削除しない。** 削除すると `NO_CACHE` 扱いになり、`tidd ai-review` が **試行1回目扱い**で test-plan から再走することになる（実害はないが冗長）
+- **`INTERRUPTED` を検知しても新しい PR を作らない。** 既存 PR に対して `uv run --project projects/py/tidd_tools tidd ai-review` を再実行するのが目的である
+- **AI review キャッシュディレクトリを手動削除しない。** 削除すると `NO_CACHE` 扱いになり、`uv run --project projects/py/tidd_tools tidd ai-review` が **試行1回目扱い**で test-plan から再走することになる（実害はないが冗長）
 - **verdict の有無だけを見る。** `test-plan-status` や `bats-status` の値は判定に使わない

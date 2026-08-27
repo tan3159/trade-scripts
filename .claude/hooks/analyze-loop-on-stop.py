@@ -10,9 +10,10 @@ Issue #827・#1055。
     をバックグラウンド実行する
   - 実行後は ~/.cache/loop-analysis-last-run のタイムスタンプを更新する
   - hook 自体は常に exit 0（セッション終了をブロックしない）
-  - projects/py/tidd_tools を含む本体リポジトリでは `uv run --project` を使い、
-    consumer 環境では uvx ゼロインストール実行方式（`_lib/tidd_uvx.build_uvx_tidd_cmd`）
-    にフォールバックする（Issue #3087）
+  - `projects/py/tidd_tools` が存在する場合は `uv run --project` を使う。
+    vendor 配布済み consumer（Issue #3979）でも同じ経路で解決する
+    （uvx ゼロインストール実行方式は Issue #3984 で撤去済み）。`uv` が PATH に
+    無い場合・`projects/py/tidd_tools` が存在しない場合は no-op で skip する
 
 環境変数:
   ANALYZE_SCRIPT       テスト用スタブ実行可能パス（未設定時は uv 経由で
@@ -38,7 +39,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.git_helpers import git_toplevel
 from _lib.hook_io import is_hook_enabled, read_stop_hook_input
-from _lib.tidd_uvx import build_uvx_tidd_cmd
 
 _NUM_RE = re.compile(r"^[1-9][0-9]*$")
 _DIGITS_RE = re.compile(r"^[0-9]+$")
@@ -136,41 +136,27 @@ def main() -> int:
     except OSError:
         pass
 
-    # uvx フォールバック経路（consumer 環境）を踏んだかどうかを覚えておく。
-    # Scenario 2（#3087）の Then 句「標準エラーに "uvx" または "network" を含む
-    # エラーメッセージを出力する」を通常 hook 実行パスでも満たすため、uvx 経路の
-    # 場合は stderr を親プロセスへパススルーして失敗を可視化する必要がある。
-    used_uvx_fallback = False
-
     if use_py_module and repo_root:
-        # 上流リポジトリ本体（projects/py/tidd_tools が存在する）では引き続き
-        # `uv run --project` を使い consumer 化しない（Issue #3087 やること4）。
-        # 本体以外（copier 配布された consumer 環境）では uvx ゼロインストール実行方式に
-        # フォールバックする（永続インストール状態を持たない）。
+        # Issue #3984: vendor 配布済み consumer（Issue #3979）でも
+        # `projects/py/tidd_tools` が存在するため `uv run --project` に一本化する
+        # （uvx ゼロインストール実行方式は撤去済み）。
         tidd_tools_project = Path(repo_root) / "projects" / "py" / "tidd_tools"
-        if tidd_tools_project.is_dir():
-            cmd: list[str] = [
-                "uv",
-                "run",
-                "--project",
-                str(tidd_tools_project),
-                "python",
-                "-m",
-                "tidd_tools",
-                "analyze-loop-errors",
-                "--create-issues",
-                "--days",
-                str(interval_days),
-            ]
-        else:
-            uvx_cmd = build_uvx_tidd_cmd(
-                "analyze-loop-errors", "--create-issues", "--days", str(interval_days)
-            )
-            if uvx_cmd is None:
-                # uvx が入っていない consumer 環境ではスキップ（hook はセッションをブロックしない）
-                return 0
-            cmd = uvx_cmd
-            used_uvx_fallback = True
+        if not tidd_tools_project.is_dir():
+            # vendor 未導入の consumer では実行対象が無いためスキップ（セッションをブロックしない）
+            return 0
+        cmd: list[str] = [
+            "uv",
+            "run",
+            "--project",
+            str(tidd_tools_project),
+            "python",
+            "-m",
+            "tidd_tools",
+            "analyze-loop-errors",
+            "--create-issues",
+            "--days",
+            str(interval_days),
+        ]
     else:
         cmd = [
             "bash",
@@ -184,8 +170,6 @@ def main() -> int:
     try:
         if foreground:
             # 同期実行時（テスト用）は stderr を捕捉し失敗時に転送する。
-            # consumer 環境で uvx 経由の tidd 解決がネットワーク到達不可等で失敗した場合、
-            # 標準エラーにエラーメッセージを出力する（Issue #3087 Scenario 2）。
             result = subprocess.run(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -199,20 +183,8 @@ def main() -> int:
             )
             if result.returncode != 0 and result.stderr:
                 sys.stderr.write(result.stderr)
-        elif used_uvx_fallback:
-            # consumer 環境（uvx フォールバック経路）はネットワーク到達不可時の可視化が
-            # マージゲート（Issue #3087 Scenario 2）となるため、バックグラウンド起動でも
-            # stderr を親プロセスに継承させて失敗メッセージを流す。
-            # stdout は静音化を維持（週次実行の成功出力でセッションを汚さない）。
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=None,  # 親プロセスの stderr を継承
-                stdin=subprocess.DEVNULL,
-                **_detach_kwargs(),
-            )
         else:
-            # nohup 相当: 親と切り離してバックグラウンド起動（本体 uv run --project 経路）
+            # nohup 相当: 親と切り離してバックグラウンド起動（uv run --project 経路）
             subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,

@@ -116,7 +116,7 @@ def _main() -> int:
         "  repo_root = _find_repo_root(Path(__file__))\n"
         "\n"
         "または `repo_root` session-scoped fixture（conftest.py 定義）を引数で受け取ってください。\n"
-        "詳細: `docs/reference/hooks.md#ban-parents-npy`\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-parents-npy`（consumer 未配布）\n"
     )
     return 2
 

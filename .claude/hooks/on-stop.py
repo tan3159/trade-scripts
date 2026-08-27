@@ -294,7 +294,9 @@ def _read_slack_enabled() -> bool:
     return _read_bool_hook_config("on-stop-slack", default=False)
 
 
-def _detect_orphan_issue_next_state_gated(repo_root: str) -> int:
+def _detect_orphan_issue_next_state_gated(
+    repo_root: str, own_session_id: str = ""
+) -> int:
     """`on-stop-orphan-detect` が有効な場合のみ孤児 state 検出を実行する（Issue #2955）.
 
     default True（従来どおり常時実行）。無効化されている場合は何もせず 0 を返す。
@@ -302,7 +304,10 @@ def _detect_orphan_issue_next_state_gated(repo_root: str) -> int:
     if not _read_bool_hook_config("on-stop-orphan-detect", default=True):
         return 0
     try:
-        return _detect_orphan_issue_next_state(repo_root)
+        if not own_session_id:
+            # 旧テスト・呼び出し元との互換性を維持する（#4107）。
+            return _detect_orphan_issue_next_state(repo_root)
+        return _detect_orphan_issue_next_state(repo_root, own_session_id)
     except Exception:  # noqa: BLE001 — Stop hook は fail-safe で exit 0
         return 0
 
@@ -360,7 +365,10 @@ def main() -> int:
     # 孤児 state を検出したら exit 2 + stderr で auto-resume 指示を注入する。
     # 3 回超の場合は fail-safe で exit 0 に落とす。
     # Issue #2955: `on-stop-orphan-detect` キーで個別 gating 可能（default True）。
-    orphan_exit_code = _detect_orphan_issue_next_state_gated(repo_root)
+    own_session_id = stop_payload.get("session_id", "")
+    if not isinstance(own_session_id, str):
+        own_session_id = ""
+    orphan_exit_code = _detect_orphan_issue_next_state_gated(repo_root, own_session_id)
     if orphan_exit_code != 0:
         return orphan_exit_code
 

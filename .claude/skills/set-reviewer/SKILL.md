@@ -82,7 +82,7 @@ echo "設定ファイル: ${REVIEWER_FILE}"
 
 ```text
 レビューバックエンドを <バックエンド名> に設定しました。
-次回 tidd ai-review を実行すると <バックエンド名> でレビューが行われます。
+次回 uv run --project projects/py/tidd_tools tidd ai-review を実行すると <バックエンド名> でレビューが行われます。
 （AI_REVIEW_BACKEND 環境変数が設定されている場合はそちらが優先されます）
 ```
 

@@ -19,7 +19,7 @@ on-stop.py の `_check_merge_summary_in_transcript()` はこの識別子を Stop
 session_id と照合し、不一致（別セッション発行）の marker は照合対象から除外する。
 session_id が記録されていない旧 marker は後方互換として常に照合される。
 
-hook 失敗原則（`docs/reference/hooks.md` §失敗原則 参照）:
+hook 失敗原則（上流リポジトリ本体の docs/reference/ 配下・`hooks.md`（consumer 未配布）の §失敗原則 参照）:
   - 対象コマンドでない・session_id が取れない・marker が存在しない等はすべて no-op（exit 0）
   - 記録の成否を stderr にログする（silent success だが可視化のためログは出す）
 

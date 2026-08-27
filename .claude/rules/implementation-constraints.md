@@ -33,4 +33,4 @@
 
 ツール・ライブラリのエラーが試行錯誤しても解消しないとき、学習時点の設定方法・API が変わっている可能性がある。最新の公式ドキュメント（リリースノート・マイグレーションガイド含む）を確認してから再試行する。
 
-詳細（各パターン詳細例・コード例・違反時対応）: docs/reference/implementation-constraints-guide.md
+詳細（各パターン詳細例・コード例・違反時対応）: ai-dev-handbook 本体の docs/reference/ 配下・`implementation-constraints-guide.md`（consumer 未配布）

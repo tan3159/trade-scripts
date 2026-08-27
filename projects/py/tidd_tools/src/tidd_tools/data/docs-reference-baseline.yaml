@@ -1,0 +1,19 @@
+# 配布物内の docs/ パス参照 baseline（Issue #4039）.
+#
+# templates/workflow/ 配下の hook・rule・skill・agent 定義から参照されているが
+# templates/workflow/docs/ に未配布の docs/ パス一覧（導入時点の既知分）。
+# 解消 Issue はこのファイルから対象行を削って進める。
+# baseline 外の新規参照は tidd pre-flight が exit 1 でブロックする。
+baseline:
+  - docs/decisions/2026-07-10-context-token-budget.md
+  - docs/decisions/2026-07-21-coderabbit-postmerge-screening.md
+  - docs/decisions/2026-08-18-context-budget-file-hard-recalibration.md
+  - docs/foo.md
+  - docs/note.md
+  - docs/personal/s-tanaka/CLAUDE.md
+  - docs/reference/context-budget.md
+  - docs/reference/gherkin-quality.md
+  - docs/reference/gherkin-required-markers.md
+  - docs/reference/hooks.md
+  - docs/reference/review-prompt-dictionary.md
+  - docs/setup/tidd-tools-pat-setup.md

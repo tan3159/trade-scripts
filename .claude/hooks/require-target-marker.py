@@ -94,7 +94,7 @@ def _main() -> int:
         "\n"
         "  pytestmark = pytest.mark.target_foo\n"
         "\n"
-        "詳細: .claude/rules/testing-framework.md（#785）・docs/reference/hooks.md#require-target-markerpy\n"
+        "詳細: .claude/rules/testing-framework.md（#785）・上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-target-markerpy`（consumer 未配布）\n"
     )
     return 2
 

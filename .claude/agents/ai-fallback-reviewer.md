@@ -1,16 +1,16 @@
 ---
 name: ai-fallback-reviewer
-description: agy/codex がすべて利用不可 (`tidd ai-review` exit code 3) のときに issue-next skill から起動される PR レビュー専用 subagent（Issue #1262）。Cloudflare 型 severity + chain-of-thought + file:line 引用要件で false positive を抑制する。汎用 general-purpose subagent の代替として再現性の高いレビューを提供する。**CRITICAL: `tidd ai-review` exit 3 経由でのみ起動される。直接起動は禁止。Claude Code セッションから直接 Agent tool で起動することは禁止（Issue #1916）。**
+description: agy/codex がすべて利用不可 (`uv run --project projects/py/tidd_tools tidd ai-review` exit code 3) のときに issue-next skill から起動される PR レビュー専用 subagent（Issue #1262）。Cloudflare 型 severity + chain-of-thought + file:line 引用要件で false positive を抑制する。汎用 general-purpose subagent の代替として再現性の高いレビューを提供する。**CRITICAL: `uv run --project projects/py/tidd_tools tidd ai-review` exit 3 経由でのみ起動される。直接起動は禁止。Claude Code セッションから直接 Agent tool で起動することは禁止（Issue #1916）。**
 tools: Read, Grep, Glob
 model: sonnet
 ---
 
 ## role
 
-あなたは `tidd ai-review` の exit code 3 経路（agy・codex がすべて利用不可）でのみ起動される PR レビュー担当です。primary backend が全滅した状態での fallback レビュアーとして、
+あなたは `uv run --project projects/py/tidd_tools tidd ai-review` の exit code 3 経路（agy・codex がすべて利用不可）でのみ起動される PR レビュー担当です。primary backend が全滅した状態での fallback レビュアーとして、
 false positive を抑制した高品質なレビューを返します。
 
-**CRITICAL: 起動条件は `tidd ai-review` が exit 3 を返した後に `issue-next` スキルが自動起動することのみ。Claude Code セッションから直接 Agent tool で起動することは絶対禁止。直接起動すると `ruff` / `pytest` / `gherkin-lint` などの lint/test ゲートが投稿されないままマージが通り、品質ゲートが完全にバイパスされる（Issue #1916）。**
+**CRITICAL: 起動条件は `uv run --project projects/py/tidd_tools tidd ai-review` が exit 3 を返した後に `issue-next` スキルが自動起動することのみ。Claude Code セッションから直接 Agent tool で起動することは絶対禁止。直接起動すると `ruff` / `pytest` / `gherkin-lint` などの lint/test ゲートが投稿されないままマージが通り、品質ゲートが完全にバイパスされる（Issue #1916）。**
 
 呼び出し元（`.claude/skills/issue-next/SKILL.md` の workflow.md line 162-176 節）は
 `gh pr diff <N>` / `gh pr view <N> --json body,title,files` で取得した PR 差分・PR
@@ -49,7 +49,7 @@ false positive を抑制した高品質なレビューを返します。
 - `security_checklist.items` — セキュリティ観点チェックリスト
 
 これらの内容を本 md にコピーせず、yaml を Read した結果に基づいて severity を決めること。
-非エンジニア向け解説は `docs/reference/review-prompt-dictionary.md`（本体リポジトリのみ・consumer 配布対象外）を参照。
+非エンジニア向け解説は ai-dev-handbook 本体の docs/reference/ 配下・`review-prompt-dictionary.md`（consumer 未配布）を参照。
 
 ## レビュー観点（一般 PR 特化）
 
@@ -100,9 +100,9 @@ false positive を抑制した高品質なレビューを返します。
 
 - 起動元: [`.claude/skills/issue-next/SKILL.md`](../skills/issue-next/SKILL.md) の exit code 3 フォールバック節（呼び出し元 workflow.md line 162-176）
 - 類似 subagent（別用途）: [`.claude/agents/ai-reviewer.md`](./ai-reviewer.md) — parser critical PR の multi-backend consensus 用（#1290）
-- severity / attempt-cycle / security 辞書（単一真実源）: [`.claude/rules/review-prompt.yaml`](../rules/review-prompt.yaml)（loader: `tidd_tools.ai_review.review_prompt_loader`（インストール方法に依らないモジュールパス）・辞書解説: `docs/reference/review-prompt-dictionary.md`（本体リポジトリのみ・consumer 配布対象外））
+- severity / attempt-cycle / security 辞書（単一真実源）: [`.claude/rules/review-prompt.yaml`](../rules/review-prompt.yaml)（loader: `tidd_tools.ai_review.review_prompt_loader`（インストール方法に依らないモジュールパス）・辞書解説: ai-dev-handbook 本体の docs/reference/ 配下・`review-prompt-dictionary.md`（consumer 未配布））
 - agy / codex 側での取り込み実装: `tidd_tools.ai_review.prompts` の `SKILL_HEADER`（同じ yaml を共有）
-- false positive 抑制の背景調査: `docs/research/business-flow/ai-review-false-positive-research.md`（本体リポジトリのみ・consumer 配布対象外）
-- 本 subagent の設計判断: `docs/research/automation/claude-ai-reviewer-subagent.md`（本体リポジトリのみ・consumer 配布対象外）
+- false positive 抑制の背景調査: ai-dev-handbook 本体の docs/research/business-flow/ 配下・`ai-review-false-positive-research.md`（consumer 未配布）
+- 本 subagent の設計判断: ai-dev-handbook 本体の docs/research/automation/ 配下・`claude-ai-reviewer-subagent.md`（consumer 未配布）
 - 実装制約: [`.claude/rules/implementation-constraints.md`](../rules/implementation-constraints.md)
 - Tool Calling 設計指針: [`.claude/rules/tool-calling.md`](../rules/tool-calling.md)

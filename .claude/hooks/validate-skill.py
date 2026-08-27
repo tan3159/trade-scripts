@@ -234,8 +234,8 @@ def _main() -> int:
     for i, err in enumerate(errors, 1):
         sys.stderr.write(f"[{i}] {err}\n\n")
     sys.stderr.write(
-        "詳細: docs/reference/skill-authoring-rules.md\n"
-        "     docs/reference/hooks.md#validate-skillpy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・"
+        "`skill-authoring-rules.md`・`hooks.md#validate-skillpy`（consumer 未配布）\n"
     )
     return 2
 

@@ -58,7 +58,7 @@ GitHub Commit Status に ❌ がある場合 auto-merge を exit 4 でブロッ�
 
 ## 関連ドキュメント
 
-- `docs/reference/test-plan-guide.md`
+- ai-dev-handbook 本体の docs/reference/ 配下・`test-plan-guide.md`（consumer 未配布）
 - `testing-framework.md`
 - `pytest-bdd-workflow.md`
 - `hooks.md`

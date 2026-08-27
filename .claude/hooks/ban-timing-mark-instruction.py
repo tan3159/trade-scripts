@@ -97,11 +97,11 @@ def _main() -> int:
         "\n"
         "理由: `issue-next-timing mark` サブコマンドは廃止されました。\n"
         "     計測境界は hook / ツール自己記録で追加すること（詳細: "
-        "`docs/reference/timing-log-schema.md`）。\n"
+        "上流リポジトリ本体の docs/reference/ 配下・`timing-log-schema.md`（consumer 未配布））。\n"
         "     mark を打つと二重記録（record_event_safe は非冪等）になり、\n"
         "     merge_summary のペアリングが壊れて「計測欠落」になります。\n"
         "\n"
-        "詳細: docs/reference/hooks.md#ban-timing-mark-instructionpy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-timing-mark-instructionpy`（consumer 未配布）\n"
     )
     return 2
 

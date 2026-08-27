@@ -141,7 +141,7 @@ def _iter_orphan_candidate_state_files(repo_root: str) -> list[Path]:
     return _iter_state_files_from_cache_dir(cache_dir)
 
 
-def detect_orphan_issue_next_state(repo_root: str) -> int:
+def detect_orphan_issue_next_state(repo_root: str, own_session_id: str = "") -> int:
     """Issue #1698: issue-next state の孤児を検出して auto-resume 指示を注入する.
 
     Issue #2474: 単一グローバル state ファイルから per-issue state ファイル
@@ -158,13 +158,15 @@ def detect_orphan_issue_next_state(repo_root: str) -> int:
              例外が発生した場合は常に 0（fail-safe）。
     """
     for state_path in _iter_orphan_candidate_state_files(repo_root):
-        exit_code = _check_state_file_for_orphan(state_path, repo_root)
+        exit_code = _check_state_file_for_orphan(state_path, repo_root, own_session_id)
         if exit_code != 0:
             return exit_code
     return 0
 
 
-def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
+def _check_state_file_for_orphan(
+    state_path: Path, repo_root: str, own_session_id: str = ""
+) -> int:
     """単一の state ファイルを孤児判定する（`detect_orphan_issue_next_state` の内部ヘルパ）.
 
     `/issue-next` の STEP 1.5 (品質チェック) で PASS コメント投稿後に turn が終了
@@ -196,6 +198,19 @@ def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
     except (OSError, json.JSONDecodeError):
         return 0
     if not isinstance(data, dict):
+        return 0
+
+    # Issue #4107: Stop hook は同じリポジトリを共有する別セッションでも発火するため、
+    # 別セッションが所有する state には auto-resume 指示を注入しない。session_id のない
+    # 旧形式 state は従来どおり孤児判定対象とする。payload 側が未対応で不明な場合は
+    # 後方互換のため判定を継続する。
+    recorded_session_id = data.get("session_id")
+    if (
+        isinstance(recorded_session_id, str)
+        and recorded_session_id
+        and own_session_id
+        and recorded_session_id != own_session_id
+    ):
         return 0
 
     current = data.get("current_issue")
@@ -238,7 +253,7 @@ def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
             "view",
             str(issue_num),
             "--json",
-            "state",
+            "state,labels",
             timeout=8,
         )
         if rc_issue != 0:
@@ -272,10 +287,29 @@ def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
                 except OSError:
                     pass
             return 0
+
     else:
         # gh 未インストール → false positive を避けるため孤児判定しない
         return 0
 
+    # Issue #4108: auto-resume のブランチ prefix は Issue の type ラベルに合わせる。
+    # ラベルが無い旧形式・取得結果に type が無い場合は、人間が補う placeholder を提示する。
+    branch_type = "<type>"
+    if isinstance(issue_data, dict):
+        labels = issue_data.get("labels")
+        if isinstance(labels, list):
+            for label in labels:
+                if not isinstance(label, dict):
+                    continue
+                label_name = label.get("name")
+                if not isinstance(label_name, str) or not label_name.startswith(
+                    "type:"
+                ):
+                    continue
+                candidate = label_name.removeprefix("type:").strip()
+                if candidate:
+                    branch_type = candidate
+                    break
     # worktree 検出: `git worktree list --porcelain` の branch 名に `issue-<N>-` を含むか。
     # worktree のディレクトリ名も `<repo>-issue-<N>-<slug>` 形式なので、branch 名検査で
     # SKILL の推奨形式をカバーできる。
@@ -342,9 +376,7 @@ def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
     # 注入する仕様を利用する。
     repo_name = Path(repo_root).name
     worktree_dir = f"../{repo_name}-issue-{issue_num}-<slug>"
-    worktree_cmd = (
-        f"git worktree add -b fix/issue-{issue_num}-<slug> {worktree_dir} origin/main"
-    )
+    worktree_cmd = f"git worktree add -b {branch_type}/issue-{issue_num}-<slug> {worktree_dir} origin/main"
     sys.stderr.write(
         f"on-stop: Orphan issue-next state detected for #{issue_num} "
         f"(no worktree, no open PR). "
@@ -352,5 +384,6 @@ def _check_state_file_for_orphan(state_path: Path, repo_root: str) -> int:
         f"Resuming STEP 2 now: {worktree_cmd}\n"
         f"Please execute: {worktree_cmd}\n"
         f"Then continue with /issue-next STEP 2 (worktree creation) for Issue #{issue_num}.\n"
+        f"If {branch_type} is <type>, replace it with the Issue type label before executing.\n"
     )
     return 2

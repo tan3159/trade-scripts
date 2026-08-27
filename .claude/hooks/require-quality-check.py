@@ -54,7 +54,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.hook_io import has_timing_event, is_hook_enabled, read_hook_input
 
-DETAIL = "詳細: docs/reference/hooks.md#require-quality-checkpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-quality-checkpy`（consumer 未配布）\n"
 
 _ISSUE_NUM_RE = re.compile(r"^Issue番号:\s*(\d+)\s*$")
 _QUALITY_CHECK_STEP = "step1.5-quality-check"

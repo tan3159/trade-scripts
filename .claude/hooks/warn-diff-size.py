@@ -9,7 +9,10 @@ exit code は常に 0（ブロックしない）。強制ブロックは #3081�
   {"warned": [500]}  # 500 行閾値の警告済み
 diff が閾値未満に戻ったら該当閾値の記録をクリアし、再横断時に再警告する。
 
-stdlib のみ使用。
+1000 行閾値は `tidd_tools.ai_review.size_gate.XXL_LINE_THRESHOLD` を単一の真実源として
+import する（Issue #3994 レビュー指摘・PR #4006）。tidd_tools が同梱されない環境
+（copier 配布先で未セットアップ等）ではハードコードの既定値にフォールバックする
+（fail-open。stdlib のみで動作継続する）。
 """
 
 from __future__ import annotations
@@ -33,9 +36,35 @@ from _lib.session_detector import is_claude_code_session
 _LOCK_FILE_RE = re.compile(r"(^|/)(uv\.lock|package-lock\.json|[^/]+\.lock)$")
 
 _THRESHOLD_500 = 500
-_THRESHOLD_1000 = 1000
+# Issue #3994 レビュー指摘（PR #4006）: pre_flight._DIFF_SIZE_BLOCK_THRESHOLD /
+# ai_review.size_gate.XXL_LINE_THRESHOLD と同じ値をハードコードで独自に持つとドリフトしうる。
+# フォールバック用の既定値としてのみ残し、実値は _resolve_xxl_threshold() で
+# size_gate.XXL_LINE_THRESHOLD の import を優先する。
+_THRESHOLD_1000_DEFAULT = 1000
 
 _STATE_REL_PATH = ".tidd/state/diff-size-warned.json"
+
+
+def _resolve_xxl_threshold(git_root: str) -> int:
+    """`ai_review.size_gate.XXL_LINE_THRESHOLD` を単一の真実源として解決する.
+
+    Issue #3994 レビュー指摘: 本 hook は独自にハードコードした 1000 を使っており、
+    pre-flight / ai-review 側の閾値が変更された場合にドリフトしうる。tidd_tools が
+    import できない環境（copier 配布先で未セットアップ等）では `_THRESHOLD_1000_DEFAULT`
+    にフォールバックする（fail-open。exit code に影響しない警告用の閾値のため）。
+    """
+    src = Path(git_root) / "projects" / "py" / "tidd_tools" / "src"
+    if src.is_dir():
+        src_str = str(src)
+        if src_str not in sys.path:
+            sys.path.insert(0, src_str)
+    try:
+        from tidd_tools.ai_review.size_gate import (  # type: ignore[import-not-found]
+            XXL_LINE_THRESHOLD as _xxl_threshold,
+        )
+    except ImportError:
+        return _THRESHOLD_1000_DEFAULT
+    return _xxl_threshold
 
 
 def _git_diff_numstat_total(repo_root: str) -> int | None:
@@ -127,6 +156,7 @@ def _main() -> int:
 
     repo_root_path = Path(git_root)
     state_file = repo_root_path / _STATE_REL_PATH
+    threshold_1000 = _resolve_xxl_threshold(git_root)
 
     # diff 行数を計測する
     diff_lines = _git_diff_numstat_total(git_root)
@@ -142,17 +172,17 @@ def _main() -> int:
     warned = updated_warned
 
     # 1000 行閾値のチェック（先に判定することで 1 回の実行で両方を踏んだときも正しく動く）
-    if diff_lines > _THRESHOLD_1000 and _THRESHOLD_1000 not in warned:
+    if diff_lines > threshold_1000 and threshold_1000 not in warned:
         print(
-            f"WARN: warn-diff-size: diff が {diff_lines} 行に達しました（{_THRESHOLD_1000} 行超）。"
+            f"WARN: warn-diff-size: diff が {diff_lines} 行に達しました（{threshold_1000} 行超）。"
             " pre-flight でブロックされます。PR を分割してください。"
-            " 詳細: docs/reference/pr-splitting-guide.md"
-            " escape hatch: <!-- allow-large-pr: <理由> -->",
+            " 詳細: 上流リポジトリ本体の docs/reference/ 配下・`pr-splitting-guide.md`（consumer 未配布）"
+            " escape hatch（PR ボディに追加・Issue #3994）: <!-- allow-xxl: <理由> -->",
             file=sys.stderr,
         )
         # 1000 行閾値と同時に 500 行閾値も横断済みのため、500 も一緒に記録する
         # （#3140: 500 が未記録のまま残ると次回編集で 500 行警告が遅延出力される）
-        warned = sorted({*warned, _THRESHOLD_500, _THRESHOLD_1000})
+        warned = sorted({*warned, _THRESHOLD_500, threshold_1000})
         _write_warned_state(state_file, warned)
         return 0
 
@@ -160,7 +190,7 @@ def _main() -> int:
     if diff_lines > _THRESHOLD_500 and _THRESHOLD_500 not in warned:
         print(
             f"WARN: warn-diff-size: diff が {diff_lines} 行に達しました（{_THRESHOLD_500} 行超）。"
-            " 分割検討ラインに達しました。詳細: docs/reference/pr-splitting-guide.md",
+            " 分割検討ラインに達しました。詳細: 上流リポジトリ本体の docs/reference/ 配下・`pr-splitting-guide.md`（consumer 未配布）",
             file=sys.stderr,
         )
         warned = sorted({*warned, _THRESHOLD_500})
