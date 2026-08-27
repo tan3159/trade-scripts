@@ -1,12 +1,12 @@
 # 既存テスト失敗の自動修正フロー（Issue #2033・pre-flight 対応: Issue #2927）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 既存問題（main ブランチ上の regression）だった場合の突合判定・自動修正フローを定義する。
 このフローは 2 つの起点に適用される:
 
-- **起点 A（PR 作成後）:** `tidd ai-review` がテスト FAILURE gate（#1982）で exit 5 を返したとき
-- **起点 B（PR 作成前・ローカル・Issue #2927）:** SKILL.md STEP 2 手順 4 の `tidd pre-flight` ローカル実行が exit 1（**stderr** に `pre-flight: FAILED — <失敗チェック名一覧>`）を返したとき
+- **起点 A（PR 作成後）:** `uv run --project projects/py/tidd_tools tidd ai-review` がテスト FAILURE gate（#1982）で exit 5 を返したとき
+- **起点 B（PR 作成前・ローカル・Issue #2927）:** SKILL.md STEP 2 手順 4 の `uv run --project projects/py/tidd_tools tidd pre-flight` ローカル実行が exit 1（**stderr** に `pre-flight: FAILED — <失敗チェック名一覧>`）を返したとき
 
 突合判定の条件・自動修正フローの骨子は起点 A/B 共通。失敗ファイルの抽出方法・突合先・自動修正フロー完了後の再開手順のみ起点ごとに分岐する（各手順内で明記）。
 
@@ -17,21 +17,22 @@
 - [自動修正フロー（既存問題と判定したときのみ）](#自動修正フロー既存問題と判定したときのみ)
 - [環境依存フレーキーテスト時の自動修正フロー（条件②'・Issue #2094）](#環境依存フレーキーテスト時の自動修正フロー条件2issue-2094)
 - [PR/pre-flight 起因時のエスカレーション](#prpre-flight-起因時のエスカレーション)
+- [exit code 3: skip-and-later-reselect（一時領域不足・Issue #4149・#4150）](#exit-code-3-skip-and-later-reselect一時領域不足issue-41494150)
 - [CRITICAL](#critical)
 
 ---
 
 ## 突合判定
 
-`tidd classify-test-failure` を実行し、**exit code で分岐する**（判定はコマンドが機械実行する。条件① = 失敗ファイル ∩ 変更ファイル = 空・条件② = origin/main 単体チェックアウトで再現。判定ロジック・出力 JSON の仕様は `docs/reference/tidd-cli-reference.md` の該当節を参照）:
+`uv run --project projects/py/tidd_tools tidd classify-test-failure` を実行し、**exit code で分岐する**（判定はコマンドが機械実行する。条件① = 失敗ファイル ∩ 変更ファイル = 空・条件② = origin/main 単体チェックアウトで再現。判定ロジック・出力 JSON の仕様は ai-dev-handbook 本体の docs/reference/ 配下・`tidd-cli-reference.md`（consumer 未配布） の該当節を参照）:
 
 - **起点 A（PR 作成後・CI commit status + CI ログから抽出）:**
   ```bash
-  tidd classify-test-failure --pr <PR番号>
+  uv run --project projects/py/tidd_tools tidd classify-test-failure --pr <PR番号>
   ```
 - **起点 B（PR 作成前・pre-flight の失敗チェック再実行から抽出・Issue #2927）:**
   ```bash
-  tidd classify-test-failure --issue <Issue番号>
+  uv run --project projects/py/tidd_tools tidd classify-test-failure --issue <Issue番号>
   ```
 
 stdout に判定根拠を JSON 1 行（キー: `verdict` / `failed_files` / `changed_files` / `condition1` / `condition2`）で出力する。
@@ -74,17 +75,17 @@ stdout に判定根拠を JSON 1 行（キー: `verdict` / `failed_files` / `cha
    git fetch origin && git merge origin/main --no-edit && git push
    ```
 
-   **起点 B（Issue #2927）:** PR がまだ存在しないため push は不要。origin/main を取り込んだ後 `tidd pre-flight` を再実行する:
+   **起点 B（Issue #2927）:** PR がまだ存在しないため push は不要。origin/main を取り込んだ後 `uv run --project projects/py/tidd_tools tidd pre-flight` を再実行する:
 
    ```bash
    cd ../<repo>-issue-<N>-<slug>
    git fetch origin && git merge origin/main --no-edit
-   tidd pre-flight
+   uv run --project projects/py/tidd_tools tidd pre-flight
    ```
 
 4. **起点 A:** CI 完了後、元の PR の ai-review を再実行する（テスト FAILURE 中断はレビュー試行に数えない。試行回数は据え置き）
 
-   **起点 B（Issue #2927）:** `tidd pre-flight` が exit 0（GREEN）になったことを確認し、SKILL.md STEP 3（PR メタデータ整備）以降を通常どおり続行する
+   **起点 B（Issue #2927）:** `uv run --project projects/py/tidd_tools tidd pre-flight` が exit 0（GREEN）になったことを確認し、SKILL.md STEP 3（PR メタデータ整備）以降を通常どおり続行する
 
 ### 環境依存フレーキーテスト時の自動修正フロー（条件②'・Issue #2094）
 
@@ -114,6 +115,42 @@ B. PR を close して Issue を再設計する — 失敗が設計問題を示�
 ```
 
 バッチモードの場合は「残りのキュー [#M1, #M2, ...] は処理されませんでした」を追記する。
+
+#### `is-unattended <N>` が exit 0 のときの対応（Issue #2802・#3633）
+
+停止せず、まず SKILL.md STEP 5「リトライループ（issue-fixer 委譲）」に合流させて自動修正を試みる（PR 起因のテスト失敗も通常のレビュー指摘同様に issue-fixer へ修正を委譲し、`uv run --project projects/py/tidd_tools tidd ai-review` を再実行する）。
+
+- **リトライで解決**（再実行後に FAILURE が解消・APPROVE まで進む）→ 通常どおりマージまで進み次の Issue へ継続する
+- **同一指摘が連続する等で解決不能と判定される**（リトライループの上限到達・指摘内容が変化しない）→ `unattended-park-and-continue.md`「park-and-continue 手順」を実行する（PR close・`needs-human-input` ラベル付与・理由コメント投稿・次 Issue へ継続。**Issue 自体は close しない**）
+
+### 起点 B（PR 作成前・pre-flight・Issue #2927）
+
+条件①（失敗ファイルが対象 Issue の変更ファイルに含まれる）を満たさない、または条件②・②' のいずれも不成立、あるいは突合判定自体が不能な場合、issue-implementer は既存問題とは判定せず自動修正フロー（別 Issue 起票）を起動しない。**attended/unattended を問わず同じ扱い**（起点 A の `--unattended` 分岐のような区別はしない）。
+
+`.claude/agents/issue-implementer.md`「続行不能時（park）」の手順に従い、以下のコメントを対象 Issue に投稿してから `🙋 needs-human-input` ラベルを付与し park する:
+
+```text
+Issue #N の pre-flight が FAILURE です（失敗ファイルが対象 Issue の変更ファイルに含まれる、または既存問題の機械判定が成立しませんでした）。
+
+失敗チェック: <失敗チェック名一覧>
+失敗ファイル: <ファイルパス一覧>
+```
+
+### exit code 3: skip-and-later-reselect（一時領域不足・Issue #4149・#4150）
+
+起点 B の `uv run --project projects/py/tidd_tools tidd pre-flight` が exit **3** を返した場合、上記の突合判定（`classify-test-failure`）には進まない。テスト失敗ではなく、`tmp_capacity`（#4143）・`tmp_cleanup`（#4144）を尽くしても回復しない一時領域不足を unattended 実行時のみ `tmp_retry` が bounded retry + backoff（既定 3 回・30 秒。`TIDD_TMP_RETRY_MAX_ATTEMPTS` / `TIDD_TMP_RETRY_BACKOFF_SECONDS` で変更可）で回復を試み、再試行上限へ到達しても回復しなかった終端である。stdout へ以下の JSON が 1 行出力される:
+
+```json
+{"status": "skip-and-later-reselect", "reason": "<診断理由>", "attempts": <試行回数>}
+```
+
+実装失敗と区別するため `🙋 needs-human-input` を付与せず、issue-implementer は `.claude/agents/issue-implementer.md`「スキップ時（park ではない）」と同じ扱いで `skip: <reason を要約した理由>` として終了する（Issue に一時領域不足で再選定する旨のコメントを投稿し、`needs-human-input` ラベルは付与せず、worktree を削除して次の Issue へ継続する）。
+
+**attended 実行時との違い:** attended（`--unattended` なし）実行時は同じ一時領域不足でも 1 回限りの掃除・再診断のみを行い、回復しなければ `EXIT_ATTENDED_FAILURE`（exit 1）を返す。この場合は exit 3 の分岐に該当せず、通常の「起点 B」手順（park・`needs-human-input` ラベル付与）に従う。
+
+---
+
+## CRITICAL
 
 - **再帰は 1 段まで。** fix Issue の処理中にさらに別の既存テスト失敗を検出した場合は自動修正フローを重ねて起動せず、エスカレーション（終了コード 2 相当・起点 B は park）として人間に委ねる
 - 突合判定が不能（失敗テストのパスを特定できない）な場合は既存問題と推定せず、PR/pre-flight 起因時と同じエスカレーションを行う

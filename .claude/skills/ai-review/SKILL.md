@@ -1,18 +1,29 @@
 ---
 name: ai-review
-description: PR のコードレビューを tidd ai-review --stop-before-merge で実行し、verdict-extractor subagent で verdict を構造化抽出する（Issue #1303）。Anthropic SDK を直接使わない。tidd ai-review の --continue-with-verdict で後続処理（マージ・タスクチェック等）を委譲する。
+description: PR のコードレビューを uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge で実行し、verdict-extractor subagent で verdict を構造化抽出する（Issue #1303）。Anthropic SDK を直接使わない。uv run --project projects/py/tidd_tools tidd ai-review の --continue-with-verdict で後続処理（マージ・タスクチェック等）を委譲する。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # /ai-review
 
 引数として PR 番号（例: `/ai-review 1234`）を受け取り、agy/codex でレビューを実行し、
 `verdict-extractor` subagent で verdict を構造化抽出して GitHub に投稿する。
 
-**背景:** `tidd ai-review` の Python 実装では `verdict.py` が Anthropic SDK（`claude-haiku-4-5`）
+**背景:** `uv run --project projects/py/tidd_tools tidd ai-review` の Python 実装では `verdict.py` が Anthropic SDK（`claude-haiku-4-5`）
 を直接呼び出していた（Issue #1243）。Issue #1303 でこれを廃止し、Claude Code の Agent tool
 経由で `verdict-extractor` subagent による構造化抽出に置換した。
+
+Issue #2645 で `/ai-review` SKILL の手書きレビュー実行（STEP 2-4）を廃止し、
+`uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge` の単一コマンドに一本化した。これにより
+出力フォーマット欠落・診断抽出失敗・timing.json 未記録などの乖離バグが解消される。
+
+## 引数
+
+- `<N>`: レビューする PR 番号（必須）
+- `<ATTEMPT>`: 試行回数（省略時 1）
+
+## 手順
 
 ### STEP 1: PR 情報と parser critical 判定を実施
 
@@ -34,13 +45,13 @@ gh pr diff <N> --name-only
 **いずれかが含まれる場合、この PR は parser critical PR**（以下 `_is_parser_critical=true` と呼ぶ）。
 verdict 確定後の STEP 3 で secondary consensus チェックを実行する。
 
-### STEP 2: tidd ai-review --stop-before-merge でレビューを実行
+### STEP 2: uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge でレビューを実行
 
 **旧 STEP 2-4（手書き diff 取得・プロンプト組み立て・agy/codex 実行・本文保存）を廃止。**
-代わりに `tidd ai-review --stop-before-merge` の単一コマンドを実行する（Issue #2645）。
+代わりに `uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge` の単一コマンドを実行する（Issue #2645）。
 
 ```bash
-tidd ai-review --stop-before-merge <N>
+uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge <N>
 ```
 
 **終了コードの解釈:**
@@ -51,7 +62,7 @@ tidd ai-review --stop-before-merge <N>
 
 **exit 3 の場合:** `issue-next` SKILL.md 「exit 3 フォールバック」節に従って fallback-review subagent を起動する。
 
-**注記（Issue #2029）:** `tee` 禁止・生セッションログ混入は `tidd ai-review` 内部で防護済み。
+**注記（Issue #2029）:** `tee` 禁止・生セッションログ混入は `uv run --project projects/py/tidd_tools tidd ai-review` 内部で防護済み。
 `backend 名の記録` / `timing.json 書き込み` / `プロンプトの出力フォーマット` も Python 経路で担保される。
 
 レビュー本文は `$AGENT_REVIEW_DIR/agent-review-<N>.md`（環境変数未設定時は `/tmp/agent-review-<N>.md`）に保存される。
@@ -100,7 +111,7 @@ consensus コメントが primary review コメントより先に GitHub 上へ�
 以下を実行し、primary review コメントを先に投稿しておく:
 
 ```bash
-tidd ai-review --post-primary-review <N>
+uv run --project projects/py/tidd_tools tidd ai-review --post-primary-review <N>
 ```
 
 **重要（Issue #2523）:** この `--post-primary-review` は PR コメントのみで投稿し、
@@ -185,11 +196,11 @@ exit 2
 判定行は `VERDICT: APPROVE` または `VERDICT: REQUEST_CHANGES` のいずれかに固定する。
 
 **フッターには secondary backend 名（`ai-reviewer subagent`）を使うこと（Issue #2660）。**
-`tidd ai-review --post-comment` に `--reviewer "ai-reviewer subagent"` を渡すことで
+`uv run --project projects/py/tidd_tools tidd ai-review --post-comment` に `--reviewer "ai-reviewer subagent"` を渡すことで
 primary backend 名（`STATE_DIR/backend-name`）を誤ってフッターに使う問題を防ぐ:
 
 ```bash
-tidd ai-review --post-comment <N> "$(cat <<'EOF'
+uv run --project projects/py/tidd_tools tidd ai-review --post-comment <N> "$(cat <<'EOF'
 ## secondary レビュー（ai-reviewer subagent・consensus 用）
 
 VERDICT: <subagent が返した verdict>
@@ -237,12 +248,12 @@ subagent 経由の consensus が実施されたか、および secondary が何�
 | agy / codex | APPROVE | REQUEST_CHANGES（2 回目・異なる指摘） | リトライ継続（exit 1）|
 | claude-code | APPROVE | — | exit 2（同一 backend → 人間エスカレーション） |
 
-secondary consensus の判定は `tidd ai-review --consensus-verdict` サブコマンドで実行する（Issue #2657）:
+secondary consensus の判定は `uv run --project projects/py/tidd_tools tidd ai-review --consensus-verdict` サブコマンドで実行する（Issue #2657）:
 
 ```bash
 # consensus 判定の実行（secondary issues は JSON 配列文字列で渡す）
 SECONDARY_ISSUES='["[CRITICAL] core.py::handle_sha_cache_hit() が stop_before_merge を受け取らない"]'
-tidd ai-review --consensus-verdict <N> REQUEST_CHANGES "$SECONDARY_ISSUES" <ATTEMPT>
+uv run --project projects/py/tidd_tools tidd ai-review --consensus-verdict <N> REQUEST_CHANGES "$SECONDARY_ISSUES" <ATTEMPT>
 # exit 0: secondary APPROVE（consensus 通過）→ STEP 4 へ
 # exit 1: リトライ継続（needs-human-merge ラベル付与なし）
 #   1 回目不一致の出力例: "consensus 不一致（1 回目）: リトライします"
@@ -260,7 +271,7 @@ uv run --project projects/py/tidd_tools tidd ai-review --post-comment <N> $'VERD
 verdict に応じて:
 
 ```bash
-tidd ai-review \
+uv run --project projects/py/tidd_tools tidd ai-review \
   --continue-with-verdict <APPROVE|REQUEST_CHANGES> <N>
 ```
 
@@ -294,15 +305,15 @@ parser critical PR（`ai_review/**`・`validate-issue.py`・`require-issue.py` �
 STEP 1 で検出し、primary（uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge via STEP 2）と
 secondary（`.claude/agents/ai-reviewer.md`）の両方が APPROVE を返したときにのみ最終 APPROVE とする。
 
-一方でも REQUEST_CHANGES を返した場合は `tidd ai-review --consensus-verdict` で判定する（Issue #2657）。
+一方でも REQUEST_CHANGES を返した場合は `uv run --project projects/py/tidd_tools tidd ai-review --consensus-verdict` で判定する（Issue #2657）。
 1 回目の不一致はエスカレーションせずリトライを継続し、同一指摘が 2 回連続した場合のみ
 `needs-human-merge` ラベルを付与して exit 2 でエスカレーションする。
 
-詳細は `docs/reference/multi-backend-consensus.md` および `docs/reference/review-backends-guide.md` を参照。
+詳細は ai-dev-handbook 本体の docs/reference/ 配下・`multi-backend-consensus.md`（consumer 未配布） および `review-backends-guide.md`（consumer 未配布） を参照。
 
 ## 関連
 
 - `.claude/agents/verdict-extractor.md` — verdict 抽出 subagent
-- `tidd_tools/ai_review/core.py` — Python の tidd ai-review（`--stop-before-merge` 実装）
-- `docs/reference/ai-review-skill.md` — 詳細ドキュメント
+- `tidd_tools/ai_review/core.py` — Python の uv run --project projects/py/tidd_tools tidd ai-review（`--stop-before-merge` 実装）
+- ai-dev-handbook 本体の docs/reference/ 配下・`ai-review-skill.md`（consumer 未配布） — 詳細ドキュメント
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
