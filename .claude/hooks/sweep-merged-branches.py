@@ -23,6 +23,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.gh_command import is_gh_pr_merge as _is_gh_pr_merge
+from _lib.git_helpers import git_toplevel
 from _lib.hook_io import (
     get_command,
     get_tool_name,
@@ -51,31 +52,42 @@ def _mcp_success(payload: dict[str, Any]) -> bool:
 
 
 def _sweep_command(repo_root: Path) -> list[str] | None:
-    """`tidd sweep-merged-branches` を実行するコマンドを解決する.
+    """`tidd sweep-merged-branches` を実行するコマンドを解決する（Issue #3984）.
 
-    グローバル `tidd` が PATH 上にあればそれを優先し、なければ
-    `uv run --project <repo>/projects/py/tidd_tools tidd` にフォールバックする。
-    どちらも使えない場合は None。
+    `uv run --project <repo>/projects/py/tidd_tools tidd` に一本化する
+    （vendor 配布・Issue #3979 により consumer にも当該パスが存在する）。
+    `uv` が PATH に無い・`projects/py/tidd_tools` が存在しない場合は None。
     """
-    if shutil.which("tidd"):
-        return ["tidd", "sweep-merged-branches"]
+    if shutil.which("uv") is None:
+        return None
     tidd_project = repo_root / "projects" / "py" / "tidd_tools"
-    if tidd_project.is_dir():
-        return [
-            "uv",
-            "run",
-            "--project",
-            str(tidd_project),
-            "tidd",
-            "sweep-merged-branches",
-        ]
-    return None
+    if not tidd_project.is_dir():
+        return None
+    return [
+        "uv",
+        "run",
+        "--project",
+        str(tidd_project),
+        "tidd",
+        "sweep-merged-branches",
+    ]
+
+
+def _resolve_repo_root(cwd: str) -> Path:
+    """cwd からリポジトリルートを解決する（PR #3989 レビュー指摘）.
+
+    `cwd` が repo 配下の subdir（例 `<repo>/docs`）の場合、そのまま
+    `projects/py/tidd_tools` を探すと実在せず sweep が no-op になる。
+    `git rev-parse --show-toplevel` でルートへ正規化し、解決不能時は cwd を返す。
+    """
+    root = git_toplevel(cwd=cwd, timeout=10)
+    return Path(root) if root else Path(cwd)
 
 
 def _run_sweep(payload: dict[str, Any], command: str | None) -> int:
     """スイープを subprocess で実行し、結果を stderr へ転記する（常に exit 0）."""
     cwd = resolve_target_cwd(payload, command)
-    cmd = _sweep_command(Path(cwd))
+    cmd = _sweep_command(_resolve_repo_root(cwd))
     if cmd is None:
         sys.stderr.write(
             "sweep-merged-branches: WARN: tidd コマンドが見つからないため"

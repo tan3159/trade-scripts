@@ -60,7 +60,7 @@ from _lib.shell_parse import strip_heredoc_bodies as _strip_heredoc_bodies
 # あらゆる該当ツール呼び出しに反応する本 hook では、対象 Issue 番号・body を特定できた
 # 後にのみ遅延 import する（auto-tick-issue-items.py と同様のパターン）。
 
-DETAIL = "詳細: docs/reference/hooks.md#block-direct-yaru-tickpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#block-direct-yaru-tickpy`（consumer 未配布）\n"
 
 _MCP_ISSUE_WRITE_TOOL = "mcp__github__issue_write"
 

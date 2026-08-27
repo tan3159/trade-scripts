@@ -358,7 +358,7 @@ def _main() -> int:
                 "  1. PR ボディに <!-- allow-test-update: <理由> --> を追加\n"
                 "  2. 再度 Write を実行する\n"
                 "\n"
-                "詳細: docs/reference/hooks.md#protect-testspy\n"
+                "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#protect-testspy`（consumer 未配布）\n"
             )
             return 2
 
@@ -424,7 +424,9 @@ def _main() -> int:
         "バグ修正に伴う再現テストを追加したい場合は tests/regressions/ に追加してください。\n"
     )
     sys.stderr.write("\n")
-    sys.stderr.write("詳細: docs/reference/hooks.md#protect-testspy\n")
+    sys.stderr.write(
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#protect-testspy`（consumer 未配布）\n"
+    )
     return 2
 
 

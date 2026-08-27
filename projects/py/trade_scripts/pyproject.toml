@@ -35,6 +35,11 @@ pythonpath = ["src"]
 markers = [
     "target_position: position sizing モジュールのテスト",
 ]
+# Issue #4141: 大量ファイルI/Oを伴うテスト（フルビルド系）を繰り返し実行すると
+# 一時ディレクトリ（tmp_path）の世代が積み上がり、tmpfs 環境で inode 枯渇を招く。
+# 既定（成功・失敗を問わず 3 世代保持）のままだと積み上がるため、失敗時のみ 1 世代に絞る。
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 
 [tool.ruff]
 line-length = 100

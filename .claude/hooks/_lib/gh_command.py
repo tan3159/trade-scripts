@@ -31,7 +31,7 @@ NO TICKET NO WORK gate 用途）は `refs` も受理する。用途による意�
 ``CLOSES_RE``（refs を含まない）と ``CLOSES_OR_REFS_RE``（refs を含む）の
 2 定数として集約し、各 hook が用途に応じて選択する。
 
-**Issue #3817:** `gh` 一本化（GitHub MCP 廃止・`docs/decisions/2026-08-14-abolish-github-mcp.md`）
+**Issue #3817:** `gh` 一本化（GitHub MCP 廃止・上流リポジトリ本体の docs/decisions/ 配下・`2026-08-14-abolish-github-mcp.md`（consumer 未配布））
 に伴い、`record-timing-boundaries.py` が STEP 1.5-d の needs-human-input（park）・
 epic-split（Epic 化）分岐を検知する対象が到達不能になった `mcp__github__issue_write` /
 `mcp__github__sub_issue_write` から `gh issue edit --add-label` / `gh issue create --parent`
@@ -40,6 +40,11 @@ epic-split（Epic 化）分岐を検知する対象が到達不能になった `
 と共有する。加えて `gh issue create` の成功判定（stdout の Issue URL）・
 `--parent`/`--add-label` の値抽出・`gh issue edit` の対象 Issue 番号抽出のユーティリティを
 追加した。
+
+Issue #4032: `block-subagent-size-marker.py` は `gh pr create` の `--body`/`--body-file`
+のみを検査対象としていたため、PR 作成後の `gh pr edit --body` による allow-xxl マーカーの
+事後自己付与を検知できなかった（PR #4023 で実際にすり抜けた実例）。`is_gh_pr_create` と
+同じ検出ロジックを共有する `is_gh_pr_edit` を追加した。
 """
 
 from __future__ import annotations
@@ -66,6 +71,7 @@ from _lib.shell_parse import strip_heredoc_bodies as _strip_heredoc_bodies
 # 旧実装のようなコマンド文字列全体へのサーチではなく `^` アンカーのみで足りる。
 _GH_PR_CREATE_PREFIX_RE = re.compile(r"^gh[ \t]+pr[ \t]+create\b")
 _GH_PR_MERGE_PREFIX_RE = re.compile(r"^gh[ \t]+pr[ \t]+merge\b")
+_GH_PR_EDIT_PREFIX_RE = re.compile(r"^gh[ \t]+pr[ \t]+edit\b")
 _GH_ISSUE_CREATE_PREFIX_RE = re.compile(r"^gh[ \t]+issue[ \t]+create\b")
 _GH_ISSUE_EDIT_PREFIX_RE = re.compile(r"^gh[ \t]+issue[ \t]+edit\b")
 
@@ -74,9 +80,54 @@ _GH_ISSUE_EDIT_PREFIX_RE = re.compile(r"^gh[ \t]+issue[ \t]+edit\b")
 _PREFIX_FALLBACK_RES: dict[tuple[str, ...], re.Pattern[str]] = {
     ("gh", "pr", "create"): _GH_PR_CREATE_PREFIX_RE,
     ("gh", "pr", "merge"): _GH_PR_MERGE_PREFIX_RE,
+    ("gh", "pr", "edit"): _GH_PR_EDIT_PREFIX_RE,
     ("gh", "issue", "create"): _GH_ISSUE_CREATE_PREFIX_RE,
     ("gh", "issue", "edit"): _GH_ISSUE_EDIT_PREFIX_RE,
 }
+
+# Issue #4203: ツールバージョンマネージャ（mise 等）経由のラップ呼び出し
+# （`mise exec -- gh pr create ...` / `mise exec node@20 -- gh pr create ...`）は、
+# 素の `gh ...` 呼び出しを前提とするトークン列比較では検出できない。フラグメント
+# 先頭がこれらのラッパー形式に一致する場合、`--` までの前置きトークンを剥がしてから
+# 判定することで、mise 経由でも downstream（Windows実機ネイティブ等）と同じ検出結果を得る。
+# 正規表現フォールバック（shlex 解析失敗時）側でも同じ前置きを文字列レベルで剥がす。
+_WRAPPER_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"mise[ \t]+exec[ \t]+(?:\S+[ \t]+)*--[ \t]+"  # mise exec [tool@ver ...] --
+    r"|env[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)+(?:--[ \t]+)?"  # env FOO=bar [--]
+    r")"
+)
+
+
+def _strip_wrapper_tokens(tokens: list[str]) -> list[str]:
+    """ツールバージョンマネージャ等のラッパー前置きトークンを剥がす（Issue #4203）.
+
+    対応パターン:
+
+    - ``mise exec -- <cmd...>``
+    - ``mise exec <tool>@<ver> [<tool2>@<ver2> ...] -- <cmd...>``
+    - ``env FOO=bar [BAR=baz ...] [--] <cmd...>``
+
+    いずれにも一致しない場合は ``tokens`` をそのまま返す。
+    """
+    if len(tokens) >= 2 and tokens[0] == "mise" and tokens[1] == "exec":
+        try:
+            sep_idx = tokens.index("--")
+        except ValueError:
+            return tokens
+        return tokens[sep_idx + 1 :]
+    if tokens and tokens[0] == "env":
+        idx = 1
+        while (
+            idx < len(tokens) and "=" in tokens[idx] and not tokens[idx].startswith("-")
+        ):
+            idx += 1
+        if idx < len(tokens) and tokens[idx] == "--":
+            idx += 1
+        if idx > 1:
+            return tokens[idx:]
+    return tokens
+
 
 # closes/refs 抽出: 用途によって受理キーワードが異なるため 2 定数を提供する（Issue #2638 由来）。
 CLOSES_RE = re.compile(r"\b(?:closes|fixes|resolves)\s+#(\d+)", re.IGNORECASE)
@@ -135,6 +186,9 @@ def _fragment_invokes_gh(fragment: str, prefix: tuple[str, ...]) -> bool:
     **Issue #3817:** 元々 `gh pr <sub>` 専用だった判定を任意プレフィックスへ一般化し、
     `gh issue create` / `gh issue edit` の検出（`is_gh_issue_create` /
     `is_gh_issue_edit`）にも同じロジックを共有する。
+
+    **Issue #4203:** `mise exec -- <cmd>` 等のツールバージョンマネージャ経由の
+    ラップ呼び出しは、剥がした後のトークン列で判定する（`_strip_wrapper_tokens`）。
     """
     stripped = fragment.strip()
     if not stripped:
@@ -148,7 +202,9 @@ def _fragment_invokes_gh(fragment: str, prefix: tuple[str, ...]) -> bool:
         prefix_re = _PREFIX_FALLBACK_RES.get(prefix)
         if prefix_re is None:
             return False
-        return bool(prefix_re.match(stripped))
+        unwrapped = _WRAPPER_PREFIX_RE.sub("", stripped, count=1)
+        return bool(prefix_re.match(unwrapped))
+    tokens = _strip_wrapper_tokens(tokens)
     return tuple(tokens[: len(prefix)]) == prefix
 
 
@@ -187,6 +243,17 @@ def is_gh_pr_merge(command: str) -> bool:
     誤検知しない（Issue #3792）。
     """
     return _is_gh_command(command, ("gh", "pr", "merge"))
+
+
+def is_gh_pr_edit(command: str) -> bool:
+    """command 内に実際に実行される `gh pr edit` 呼び出しが含まれるか判定する（Issue #4032）.
+
+    `is_gh_pr_create` と同じ検出ロジック（heredoc 除去 → チェーン分割 →
+    トークン列比較）を共有する。`block-subagent-size-marker.py` が
+    `gh pr edit --body`/`--body-file` を介した allow-xxl マーカーの事後自己付与
+    （`gh pr create` 時点では検知できないケース）を検知するために使う。
+    """
+    return _is_gh_command(command, ("gh", "pr", "edit"))
 
 
 def is_gh_issue_create(command: str) -> bool:

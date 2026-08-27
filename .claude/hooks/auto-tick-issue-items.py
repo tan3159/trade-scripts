@@ -44,7 +44,7 @@ from _lib.hook_io import (
     read_hook_input,
 )
 
-DETAIL = "詳細: docs/reference/hooks.md#auto-tick-issue-itemspy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#auto-tick-issue-itemspy`（consumer 未配布）\n"
 
 _BACKTICK_PATH_RE = re.compile(r"`([^`]+)`")
 _MCP_CREATE_PR_TOOL = "mcp__github__create_pull_request"

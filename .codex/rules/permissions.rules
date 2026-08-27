@@ -159,6 +159,84 @@ prefix_rule(
     match = ["declare -x"],
 )
 
+# ── deny: シェル経由の deny 迂回禁止（settings.json permissions.deny の Bash 系移植・#3967） ──
+# `bash -c "..."` / `sh -c "..."` でシェルを一段挟むと、上記の deny ルールが
+# コマンド文字列全体ではなく起動コマンド（bash/sh）のみを見て判定するため迂回できる。
+
+# Bash(bash -c *)
+prefix_rule(
+    pattern = ["bash", "-c"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(bash -c *) → シェル経由の deny 迂回禁止（#3967）",
+    match = ["bash -c \"git push --force\""],
+)
+
+# Bash(sh -c *)
+prefix_rule(
+    pattern = ["sh", "-c"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(sh -c *) → シェル経由の deny 迂回禁止（#3967）",
+    match = ["sh -c \"rm -rf /tmp/x\""],
+)
+
+# Bash(sudo bash*)
+prefix_rule(
+    pattern = ["sudo", "bash"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(sudo bash*) → sudo 経由のシェル起動禁止（#3967）",
+    match = ["sudo bash -c \"rm -rf /tmp/x\""],
+)
+
+# ── deny: 機密ファイル名を対象とした cat 経由の読み出し禁止（settings.json permissions.deny の Bash 系移植・#4021） ──
+# permissions.allow に Bash(cat*) 等が広く許可されているため、Read/Edit deny だけでは
+# `cat .mise.toml` のような Bash 経由の読み出しを塞げない。Claude Code 側は
+# `Bash(cat*.mise.toml*)` のようにコマンド文字列中の任意位置の部分一致で表現するが、
+# Codex の prefix_rule は argv の先頭一致のみのため、代表的な直接呼び出し
+# （`cat <ファイル名>`）のみを forbidden 化する（`cat foo/.mise.toml` のような
+# サブディレクトリ経由・`cat -A .mise.toml` のようなフラグ付きは prefix 照合の
+# 制約で表現できない・§4-4 と同じ方式差）。
+
+# Bash(cat*.env*)
+prefix_rule(
+    pattern = ["cat", ".env"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(cat*.env*) → 機密ファイル .env の cat 経由読み出し禁止（#4021）",
+    match = ["cat .env"],
+    not_match = ["cat README.md"],
+)
+
+# Bash(cat*.envrc*)
+prefix_rule(
+    pattern = ["cat", ".envrc"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(cat*.envrc*) → 機密ファイル .envrc の cat 経由読み出し禁止（#4021）",
+    match = ["cat .envrc"],
+)
+
+# Bash(cat*.mise.toml*)
+prefix_rule(
+    pattern = ["cat", ".mise.toml"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(cat*.mise.toml*) → 機密ファイル .mise.toml の cat 経由読み出し禁止（#4021）",
+    match = ["cat .mise.toml"],
+)
+
+# Bash(cat*private-key.pem*)
+prefix_rule(
+    pattern = ["cat", "private-key.pem"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(cat*private-key.pem*) → 秘密鍵 private-key.pem の cat 経由読み出し禁止（#4021）",
+    match = ["cat private-key.pem"],
+)
+
+# Bash(cat*credentials.json*)
+prefix_rule(
+    pattern = ["cat", "credentials.json"],
+    decision = "forbidden",
+    justification = "Claude Code 相当: Bash(cat*credentials.json*) → 機密ファイル credentials.json の cat 経由読み出し禁止（#4021）",
+    match = ["cat credentials.json"],
+)
+
 # ── allow: 通常ワークフローコマンドの許可（settings.json permissions.allow の Bash 系移植） ──
 # decision="allow" はサンドボックス外でプロンプトなし実行を許可する（Claude Code の
 # allow リスト相当）。deny ルールと衝突した場合は forbidden が優先される。

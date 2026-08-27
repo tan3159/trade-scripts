@@ -8,20 +8,26 @@ CI 再待ち」という往復コストを毎 PR で踏んでいる。ruff forma
 `require-ruff-format.py`（#1752）と同構造でローカル gate に前出しする。
 
 本 hook は `gh pr create` の Bash 呼び出しを検知して `projects/py/` 配下から
-検査対象プロジェクト（`src/` を持つディレクトリ）を動的に検出し、そのディレクトリを
-cwd に `uv run --extra dev mypy src tests` を実行し、型エラーがあれば exit 2 で block する。
-（repo root から `mypy src tests` は解決できないため、CI ステップと同じくプロジェクト
-ディレクトリを cwd にして実行する。`--extra dev` は consumer の dev 依存 mypy を
-解決するために必要・Issue #3564。）
+検査対象プロジェクト（`src/` と `tests/` の両方を持つディレクトリ）を動的に検出し、
+そのディレクトリを cwd に `uv run --extra dev mypy src tests` を実行し、型エラーが
+あれば exit 2 で block する。（repo root から `mypy src tests` は解決できないため、
+CI ステップと同じくプロジェクトディレクトリを cwd にして実行する。`--extra dev` は
+consumer の dev 依存 mypy を解決するために必要・Issue #3564。）
 
-**対象プロジェクトの検出（Issue #2278）:** `projects/py/tidd_tools/src/` が存在すれば
-handbook 自身の従来挙動を保つため優先的に選ぶ。存在しない consumer レイアウトでは
-`projects/py/` 配下で `src/` を持つ最初のディレクトリ（名前順）を対象にする。
+**対象プロジェクトの検出（Issue #2278 / #4012）:** `projects/py/tidd_tools/` に
+`src/` と `tests/` の両方が存在すれば handbook 自身の従来挙動を保つため優先的に選ぶ。
+vendor 配布された `tidd_tools`（`tests/` 非同梱・Issue #3979）が優先プロジェクトに
+選ばれた状態のままだと、consumer が実際に開発対象とする他プロジェクトの mypy 検査が
+一度も走らなくなるため、`tidd_tools` が `tests/` を欠く場合は **選定自体を** `tests/`
+を持つ他候補へフォールバックする（`_lib/target_dir.py` の `require_tests=True`。
+consumer #915 の実装を upstream の正式仕様として統合したもの・Issue #4012）。
+存在しない consumer レイアウトでは `projects/py/` 配下で `src/` と `tests/` の両方を
+持つ最初のディレクトリ（名前順）を対象にする。
 
 **skip する条件（exit 0 + stderr に WARN）:**
 
 - `uv` が PATH に存在しない
-- `projects/py/` 配下に `src/` を持つプロジェクトが 1 つも存在しない
+- `projects/py/` 配下に `src/` と `tests/` の両方を持つプロジェクトが 1 つも存在しない
 - mypy が `REQUIRE_MYPY_TIMEOUT_SEC`（default 120s）で timeout
 
 stdlib のみ使用。
@@ -54,7 +60,7 @@ _TIMEOUT_ENV_VAR = "REQUIRE_MYPY_TIMEOUT_SEC"
 
 
 def _find_target_dir(repo_root: Path) -> Path | None:
-    """`projects/py/` 配下から検査対象プロジェクトを検出する（Issue #2278 / #2958）.
+    """`projects/py/` 配下から検査対象プロジェクトを検出する（Issue #2278 / #2958 / #4012）.
 
     consumer では `projects/py/tidd_tools` が存在しないため、`src/` を持つ
     プロジェクトディレクトリを動的に探す。`tidd_tools` が存在する場合は
@@ -62,8 +68,11 @@ def _find_target_dir(repo_root: Path) -> Path | None:
 
     Issue #2958: 検出ロジック本体は `_lib/target_dir.py` の `find_target_dir()`
     に委譲する（mypy は `mypy src tests` を実行するため `require_src=True`）。
+    Issue #4012: vendor 配布された `tidd_tools`（`tests/` 非同梱）が優先プロジェクト
+    に選ばれ続けると他プロジェクトの mypy 検査が漏れるため `require_tests=True` を
+    渡し、選定自体を `tests/` を持つ他候補へフォールバックさせる。
     """
-    return _find_target_dir_shared(repo_root, require_src=True)
+    return _find_target_dir_shared(repo_root, require_src=True, require_tests=True)
 
 
 def _git_toplevel(cwd: str | None = None) -> Path | None:
@@ -103,16 +112,21 @@ def _main() -> int:
     target_dir = _find_target_dir(repo_root)
     if target_dir is None:
         sys.stderr.write(
-            f"WARN: require-mypy: {_PROJECTS_PY_SUBDIR}/ 配下に src を持つプロジェクトが見つかりません。skip します。\n"
+            f"WARN: require-mypy: {_PROJECTS_PY_SUBDIR}/ 配下に src と tests を持つプロジェクトが見つかりません。skip します。\n"
         )
         return 0
+
+    # Issue #4012: _find_target_dir() が require_tests=True で選定するため、
+    # target_dir は必ず tests/ を持つ（#3998 の mypy_targets 縮小分岐は到達不能
+    # コードのため削除済み）。
+    mypy_targets = ["src", "tests"]
 
     try:
         # Issue #3564: consumer では mypy が `[project.optional-dependencies] dev` に
         # のみ存在するため、`--extra dev` を付けないと fresh worktree（.venv 無し）で
         # `Failed to spawn: mypy` になり PR 作成を恒久ブロックする。
         result = subprocess.run(
-            ["uv", "run", "--extra", "dev", "mypy", "src", "tests"],
+            ["uv", "run", "--extra", "dev", "mypy", *mypy_targets],
             cwd=str(target_dir),
             capture_output=True,
             text=True,
@@ -124,13 +138,13 @@ def _main() -> int:
     except FileNotFoundError:
         sys.stderr.write(
             "WARN: require-mypy: uv が見つからないため skip します。"
-            " docs/reference/hooks.md#require-mypypy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-mypypy`（consumer 未配布） 参照\n"
         )
         return 0
     except subprocess.TimeoutExpired:
         sys.stderr.write(
             f"WARN: require-mypy: timeout ({_get_timeout_sec()}s) により skip します。"
-            " docs/reference/hooks.md#require-mypypy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-mypypy`（consumer 未配布） 参照\n"
         )
         return 0
 
@@ -156,12 +170,14 @@ def _main() -> int:
         sys.stderr.write("解決手順:\n")
         sys.stderr.write(f"  cd {target_dir}\n")
         sys.stderr.write("  uv sync --extra dev\n")
-        sys.stderr.write("  uv run --extra dev mypy src tests\n")
+        sys.stderr.write(f"  uv run --extra dev mypy {' '.join(mypy_targets)}\n")
         sys.stderr.write(
             "  それでも失敗する場合は pyproject.toml の dev に mypy を追加してください\n"
         )
         sys.stderr.write("\n")
-        sys.stderr.write("詳細: docs/reference/hooks.md#require-mypypy\n")
+        sys.stderr.write(
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-mypypy`（consumer 未配布）\n"
+        )
         return 2
 
     # 非 0 exit = 型エラー検出。stderr にレポートを出して block する。
@@ -174,10 +190,12 @@ def _main() -> int:
     sys.stderr.write("\n")
     sys.stderr.write("解決手順:\n")
     sys.stderr.write(f"  cd {target_dir}\n")
-    sys.stderr.write("  uv run --extra dev mypy src tests\n")
+    sys.stderr.write(f"  uv run --extra dev mypy {' '.join(mypy_targets)}\n")
     sys.stderr.write("  型エラーを修正して commit → push 後に gh pr create を再実行\n")
     sys.stderr.write("\n")
-    sys.stderr.write("詳細: docs/reference/hooks.md#require-mypypy\n")
+    sys.stderr.write(
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-mypypy`（consumer 未配布）\n"
+    )
     return 2
 
 

@@ -3,7 +3,7 @@ name: detect-duplicates
 description: open Issue を全スキャンして意味的重複疑いペアを検出し duplicate-suspect ラベル + コメントを付与する（Issue #1306）。日次 schedule または手動 slash command として発火する。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # /detect-duplicates
 
@@ -37,11 +37,11 @@ gh issue list --state open --limit 100 --json number,title,labels,body
 - `body` は先頭 500 文字に限定してトークンを節約する
 - ページ巡回で最大 500 件取得（通常は十分な上限）
 
-**Issue 数が 100+ の場合（Issue #1466 対応）:** `tidd detect-duplicates-batch` サブコマンドで priority + created_at 順に並び替え、30 Issue/batch で分割してから subagent に渡す。各 batch の実行時間は `~/.cache/detect-duplicates-perf/batch-<N>.json` に自動記録される。
+**Issue 数が 100+ の場合（Issue #1466 対応）:** `uv run --project projects/py/tidd_tools tidd detect-duplicates-batch` サブコマンドで priority + created_at 順に並び替え、30 Issue/batch で分割してから subagent に渡す。各 batch の実行時間は `~/.cache/detect-duplicates-perf/batch-<N>.json` に自動記録される。
 
 ```bash
 # Issue 数が多いときの batch 分割 + perf 記録（Issue #1466）
-tidd detect-duplicates-batch --batch-size 30 --dry-run
+uv run --project projects/py/tidd_tools tidd detect-duplicates-batch --batch-size 30 --dry-run
 ```
 
 `--dry-run` を付けると各 batch の issue 番号を stderr にログ出力するだけで実質処理をスキップする（perf 記録は常に行う）。skill 側の subagent 起動 loop は本 CLI の scope 外であり、SKILL.md 側で STEP 2 以降を batch ごとに繰り返す運用に切り替える（batch 分割ロジックの詳細は `tidd_tools.detect_duplicates_batch` モジュールを参照）。
@@ -63,6 +63,14 @@ subagent 起動は行わない。
 
 ### STEP 2: Agent tool で duplicate-detector subagent を起動
 
+起動前に実行環境を `claude_code` / `codex` のどちらかとして判定し、共通 routing を解決する。
+コマンドが非ゼロなら stderr をそのまま表示して終了し、subagent を起動しない。成功時は JSON の
+`native_mechanism` で起動 tool を選び、`agent_type` と `model`（`null` は指定省略）を起動引数へそのまま渡す。
+
+```bash
+uv run --project projects/py/tidd_tools tidd resolve-subagent-routing --launcher <claude_code|codex> --role duplicate-detector
+```
+
 全 issues リストを **全 subagent に渡す**（クロスパーティション重複を見逃さないため）。
 各 subagent は「自分のアンカー担当範囲の Issue（lower 番号）を含むペア」のみを探す。
 
@@ -71,8 +79,9 @@ subagent 起動は行わない。
 - 51 件以上: Issue 番号昇順でソートして均等に 3 分割し、3 subagent を並列起動
 
 ```
-Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="duplicate_detector", task_name="duplicate_detector", message=...) に読み替え
-  subagent_type="duplicate-detector",
+Agent(  # routing.native_mechanism を使う。Codex では spawn_agent(task_name="duplicate_detector", message=...)
+  subagent_type=<routing.agent_type>,
+  model=<routing.model>,  # null の場合は省略
   description="重複疑いペア検出（anchor: Issue #X〜#Y 担当）",
   prompt=<以下の形式で全 issues + anchor 範囲を渡す>
 )
@@ -191,7 +200,7 @@ gh issue comment <b> --body-file <一時ファイル>  # 本文: "重複疑い: 
 
 Issue #1282 (schedule PoC) の結果に応じて以下のいずれかで運用する:
 
-- **PoC 成功**: `tidd schedule` または Claude Code schedule で `cron: 0 9 * * *`（毎朝 9:00 JST）自動発火
+- **PoC 成功**: `uv run --project projects/py/tidd_tools tidd schedule` または Claude Code schedule で `cron: 0 9 * * *`（毎朝 9:00 JST）自動発火
 - **PoC 失敗**: 週次 or 着手前に手動 `/detect-duplicates` を実行する
 
 ## 注意事項

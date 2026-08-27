@@ -21,11 +21,21 @@ docs/decisions/YYYY-MM-DD-<slug>.md に決定を自動記録する。
 
 ---
 
+## いつコミットするか（コミットタイミング）
+
+**記録したら必ずコミットする。** Write 直後に自動でコミットする（放置すると別 worktree・別セッションから参照できなくなる）。実装 PR があれば同梱、なければ独立コミットで `refs #N`（対象 Issue が未実装の場合）を使う。
+
+**対応する Issue / PR が無い場合:** 先に Issue を起票してから `refs #N` でコミットする。詳細: コミット方法の全体は下記ガイド参照。
+
+**`docs/decisions/**` のみなら直接 push 可（require-preflight-marker.py 判定・#4169）**
+
+---
+
 ## 記録ファイルの構成
 
 `# 決定の要約` + ヘッダ（決定日・記録者・参照）> `## 論点` > `## 提示した選択肢`（表）> `## ユーザーの決定` > `## 理由・背景` > `## 今後 AI が取るべき行動`
 
-テンプレート全文・ファイル命名・コミット方法・記録不要ケース: docs/reference/decision-journal-guide.md
+テンプレート全文・ファイル命名・コミット方法・記録不要ケース: ai-dev-handbook 本体の docs/reference/ 配下・`decision-journal-guide.md`（consumer 未配布）
 
 ---
 

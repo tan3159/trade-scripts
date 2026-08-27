@@ -77,7 +77,7 @@ def _write_invalid_marker_message(issue_number: int) -> None:
     sys.stderr.write(
         f"Blocked: Issue #{issue_number} の yaru-tracking marker の書式が不正です。\n"
         "正しい書式: <!-- yaru-tracking: #<follow-up-issue-num> -->\n"
-        "詳細: docs/reference/hooks.md#require-yaru-consistencypy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-yaru-consistencypy`（consumer 未配布）\n"
     )
 
 
@@ -189,7 +189,7 @@ def _main() -> int:
         "  1. Issue body の やること checkbox を `- [x]` に更新してから再度 close する\n"
         "  2. 残す項目に `[手動]` / `[AI確認]` / `[AI確認-post-merge]` プレフィックスを追加する\n"
         "  3. Issue body に `<!-- yaru-tracking: #<follow-up-issue-num> -->` marker を追加する\n"
-        "\n詳細: docs/reference/hooks.md#require-yaru-consistencypy\n"
+        "\n詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-yaru-consistencypy`（consumer 未配布）\n"
     )
     return 2
 

@@ -47,12 +47,15 @@ groups:
     hooks:
       - block-dangerous-git
       - block-subagent-review-merge
+      - block-subagent-size-marker
       - block-unauthorized-fallback-review
       - block-background-ai-review
       - block-unattended-escalation
       - require-worktree-for-edit
       - require-subagent-prompt-contract
       - require-quality-check
+      - require-split-consideration
+      - require-ai-reviewer-worktree-path
       - ban-shell-files
       - ban-timing-mark-instruction
       - ban-anthropic-import
@@ -76,6 +79,7 @@ groups:
       - require-closes-in-pr-body
       - require-no-xfail-stepdefs
       - require-merge-ci-status
+      - require-pr-state-drift-check
       - require-mypy
       - require-preflight-marker
       - require-ruff-format
@@ -95,7 +99,6 @@ groups:
       - session-start-memory-warn
       - session-start-claude-local-md-warn
       - session-start-verify-post-merge  # 対: .claude/skills/verify-post-merge/SKILL.md + .claude/agents/post-merge-verifier.md（#3766）
-      - sync-global-tidd-entrypoints
       - on-stop
       - on-stop-slack
       - on-stop-orphan-detect
@@ -106,6 +109,7 @@ groups:
       - require-issue-next-completion
       - stamp-merge-summary-session
       - stamp-issue-next-session
+      - stamp-schedule-wakeup
       - sweep-merged-branches
 
   - name: observability

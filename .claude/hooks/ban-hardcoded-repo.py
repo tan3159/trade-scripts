@@ -110,7 +110,7 @@ def _check_content_lines(
             "リポジトリ固有文字列 (being-gaia-plan, ai-dev-handbook) "
             "がハードコードされています。\n"
             "gh repo view --json nameWithOwner -q .nameWithOwner で動的取得に変更してください。\n"
-            "詳細: Issue #336, #868 / docs/reference/hooks.md#ban-hardcoded-repopy\n"
+            "詳細: Issue #336, #868 / 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-hardcoded-repopy`（consumer 未配布）\n"
         )
         sys.stderr.write(f"Blocked: {found_message}\n")
         return True, found_message
@@ -124,7 +124,7 @@ def _check_content_lines(
         found_message = (
             f"{message}。\n"
             f"個人値・組織固有値のハードコードは避け、環境変数や設定ファイルで管理してください。\n"
-            f"詳細: docs/reference/hooks.md#ban-hardcoded-repopy\n"
+            f"詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-hardcoded-repopy`（consumer 未配布）\n"
         )
         sys.stderr.write(f"Blocked: {message}\n")
         return True, found_message

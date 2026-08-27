@@ -59,7 +59,7 @@ def _check_body(body: str) -> int:
         "closes なしで作成したい場合は PR ボディに以下を追加してください:\n"
         "  <!-- allow-no-closes: <理由> -->\n"
         "\n"
-        "詳細: docs/reference/hooks.md#require-closes-in-pr-bodypy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-closes-in-pr-bodypy`（consumer 未配布）\n"
     )
     return 2
 

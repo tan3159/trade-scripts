@@ -35,11 +35,18 @@ feat/fix は 2 層構造がデフォルト: 振る舞い層（`.feature` + step_
 - 環境構築スクリプトの副作用部分（ネットワーク依存）
 - 外部サービス連携の認証・接続確認（`[手動]` 項目として扱う）
 
-**適用範囲外（feat/fix でもテスト不要）:** `config/` 配下の CSS・YAML・JSON、`docs/` frontmatter のみの変更、`pyproject.toml` のマーカー追加など、`docs/reference/testing-guide.md` 「よくある誤適用パターン」を参照。
+**適用範囲外（feat/fix でもテスト不要）:** `config/` 配下の CSS・YAML・JSON、`docs/` frontmatter のみの変更、`pyproject.toml` のマーカー追加など、ai-dev-handbook 本体の docs/reference/ 配下・`testing-guide.md`（consumer 未配布）「よくある誤適用パターン」を参照。
+
+## 大量ファイル生成テストの tmp_path・inode 注意（#4141）
+
+フルビルド系等の大量ファイル生成テストは tmpfs で inode 枯渇を招く。
+`tmp_path_retention_count` は `tmp_path` 配下のみに効き、`/tmp` への絶対パス書き込みには
+効かない。独自 teardown での明示的クリーンアップも検討する（詳細: ai-dev-handbook 本体の
+docs/reference/ 配下・`testing-guide.md`（consumer 未配布））。
 
 ## テストファイル保護（`protect-tests.py`）
 
 `protect-tests.py` が `*/tests/` への書き込みをブロック（#833）。
 更新時は PR ボディに `<!-- allow-test-update: <理由> -->` を追加してバイパスする（理由必須）。
 
-**詳細ガイド（実装例・protect-tests・判断フロー・Phase 2 計画）:** docs/reference/testing-guide.md
+**詳細ガイド（実装例・protect-tests・判断フロー・Phase 2 計画）:** ai-dev-handbook 本体の docs/reference/ 配下・`testing-guide.md`（consumer 未配布）

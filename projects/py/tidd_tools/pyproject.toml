@@ -1,0 +1,941 @@
+[project]
+name = "tidd_tools"
+version = "0.1.0"
+description = "TiDD ワークフローの開発インフラ CLI（test-plan / ai-review / hooks 等の Python 実装）"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",  # Issue #3116: custom backend（OpenAI 互換 API）の HTTP client
+    "platformdirs>=4",
+    "PyJWT[crypto]>=2.8",
+    "pyyaml>=6.0",
+    # Issue #3693: pre-flight の hooks lint（ruff/mypy）を実行中環境の python -m で
+    # 解決するため runtime deps に含める（consumer の uvx 環境でも検査可能にする）。
+    # Issue #2478 の厳密ピンは、#2562 で uv.lock を git 管理化し lock ファイルが
+    # 版ドリフトを解決するようになったため役目を終え、下限指定に戻す。
+    # Issue #3698: mypy 2.1+ の native parser（--native-parser）が PEP 758
+    # （except A, B:・Python 3.14）を runtime Python 非依存で受理する。ruff 0.16 の
+    # py314 target が生成する PEP 758 形式を hooks-lint が許容できるよう下限を 2.1 に上げる。
+    "mypy>=2.1",
+    "ruff>=0.16.0",
+    # Issue #4025: detect-secrets-check サブコマンドが .secrets.baseline 照合に使う。
+    # .pre-commit-config.yaml の detect-secrets hook（rev v1.5.0）とバージョンを揃える。
+    "detect-secrets>=1.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<10",  # Issue #2113: pytest-bdd 8.1.0 が pytest 10 で削除される内部 API を使用しているため上限固定
+    "pytest-mock>=3.12",
+    "pytest-cov>=5.0",
+    "pytest-bdd>=7.0",
+    "pytest-xdist>=3.0",  # Issue #2191: pytest 並列化（-n auto）で pre-flight/ai-review を高速化
+    "mutmut>=3.0",
+    "syrupy>=5.5.3",
+    "vulture>=2.11",  # Issue #3058: 未使用関数・変数の機械検出（pre-flight ratchet）
+]
+# Issue #1626: ローカル埋め込み pre-filter 用オプション依存
+# `uv add model2vec` または `uv add tidd-tools[embeddings]` でインストール
+embeddings = [
+    "model2vec>=0.5",
+]
+
+[project.scripts]
+tidd = "tidd_tools.__main__:main"
+
+[project.entry-points."tidd_tools.commands"]
+test-plan = "tidd_tools.test_plan:register"
+classify-test-failure = "tidd_tools.classify_test_failure:register"
+check-no-shell-files = "tidd_tools.check_no_shell_files:register"
+issue-next-state = "tidd_tools.issue_next_state:register"
+loop-error-log = "tidd_tools.loop_error_log:register"
+check-pr-conflicts = "tidd_tools.check_pr_conflicts:register"
+analyze-performance = "tidd_tools.analyze_performance:register"
+analyze-loop-errors = "tidd_tools.analyze_loop_errors:register"
+watch-circleci-failures = "tidd_tools.watch_circleci_failures:register"
+wait-ci = "tidd_tools.wait_ci:register"
+worktree-add = "tidd_tools.worktree_add:register"
+ai-review = "tidd_tools.ai_review.cli:register"
+collect-env-snapshot = "tidd_tools.collect_env_snapshot:register"
+report-test-status = "tidd_tools.report_test_status:register"
+run-project-tests = "tidd_tools.run_project_tests:register"
+screenshot-attach = "tidd_tools.screenshot_attach:register"
+lint-hardcoded-repo = "tidd_tools.lint_hardcoded_repo:register"
+win-compat-scan = "tidd_tools.win_compat_scan:register"
+sandbox-copier-poc = "tidd_tools.sandbox_copier_poc:register"
+copier-update = "tidd_tools.copier_update:register"
+issue-quality-check = "tidd_tools.issue_quality_check:register"
+extract-feature = "tidd_tools.extract_feature:register"
+xfail-status = "tidd_tools.xfail_status:register"
+audit-mutmut-review = "tidd_tools.audit_mutmut_review:register"
+detect-duplicates-batch = "tidd_tools.detect_duplicates_batch:register"
+resolve-issue-next-agent = "tidd_tools.resolve_issue_next_agent:register"
+resolve-subagent-routing = "tidd_tools.subagent_routing_resolver:register"
+check-template-drift = "tidd_tools.check_template_drift:register"
+verify-post-merge = "tidd_tools.verify_post_merge:register"
+weekly-audit = "tidd_tools.weekly_audit:register"
+human-queue = "tidd_tools.human_queue:register"
+resume-candidates = "tidd_tools.resume_candidates:register"
+configure = "tidd_tools.configure:register"
+label-pr-slo = "tidd_tools.label_pr_slo:register"
+post-test-status = "tidd_tools.post_test_status:register"
+context-budget = "tidd_tools.context_budget:register"
+context-usage = "tidd_tools.context_usage:register"
+memory-triage = "tidd_tools.memory_triage:register"
+tick-evidence = "tidd_tools.tick_evidence:register"
+lead-time = "tidd_tools.lead_time:register"
+transfer-issue-items = "tidd_tools.transfer_issue_test_items:register"
+pre-flight = "tidd_tools.pre_flight:register"
+ai-review-timing = "tidd_tools.ai_review_timing_report:register"
+issue-next-timing = "tidd_tools.issue_next_timing:register"
+merge-summary = "tidd_tools.merge_summary:register"
+config = "tidd_tools.config:register"
+health-check = "tidd_tools.health_check:register"
+repo-bootstrap = "tidd_tools.repo_bootstrap:register"
+consumer-init = "tidd_tools.consumer_init:register"
+cleanup-merged-branch = "tidd_tools.cleanup_merged_branch:register"
+docs-sync = "tidd_tools.docs_sync:register"
+check-in-progress-label = "tidd_tools.issue_progress_label:register"
+tdd-check = "tidd_tools.tdd_check:register"
+propose-step = "tidd_tools.propose_step:register"
+ensure-agents-skills = "tidd_tools.ensure_agents_skills:register"
+sweep-merged-branches = "tidd_tools.sweep_merged_branches:register"
+release = "tidd_tools.release:register"
+sync-template = "tidd_tools.sync_template:register"
+detect-secrets-check = "tidd_tools.detect_secrets_check:register"
+sync-pre-commit-rev = "tidd_tools.sync_pre_commit_rev:register"
+pre-commit-pytest = "tidd_tools.precommit_pytest:register"
+
+[tool.uv]
+package = true
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tidd_tools"]
+
+[tool.pytest.ini_options]
+# Issue #2834: 成功したテストの一時ディレクトリを残さず、保持世代も 1 つに絞る。
+# 既定（成功・失敗を問わず 3 世代保持）のままだと consumer venv を作るテストの
+# 生成物が積み上がってファイルシステムを食い潰す。
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
+# Issue #2117: ホワイトリスト外の未知 warning を即座に failure にする。
+# 新規 warning が発生した場合は CI が自動的に落ちるため、放置による技術的負債を防ぐ。
+# 新しい warning が出た場合は ignore エントリを追加した上で別 Issue で対応方針を検討する。
+filterwarnings = [
+    "error",
+    # pytest-bdd 8.1.0 が pytest 内部 API（_register_fixture / FixtureDef）を使用しているため発生。
+    # pytest<10 の上限固定（pyproject.toml dev 依存の上限コメント参照）で回避中。
+    # Issue #2113: pytest-bdd が pytest 10 対応完了後に削除予定。
+    "ignore::pytest.PytestRemovedIn10Warning",
+    # テスト内で起動した subprocess が終了前に GC される場合に発生。
+    # テストコード側での制御が困難なため ignore する。
+    "ignore::ResourceWarning",
+]
+markers = [
+    "target_fix_4225_codex_agents_template_drift: .codex/agents/issue_implementer.toml の配布テンプレートとの model 値ドリフト回帰テスト (#4225)",
+    "target_fix_4216_testing_stubs_vendor: write_stub() を tests/ から src/ の配布対象へ移設し consumer へ vendor 配布する回帰テスト (#4216)",
+    "target_fix_4141_tmp_path_inode_guidance: pytest 一時ディレクトリの inode 枯渇を防ぐガイダンス・設定の回帰テスト (#4141)",
+    "target_issue_4147: バイパスマーカー付き PR を AI レビュアーが正しく認識する振る舞いテスト (#4147)",
+    "target_ai_review_bypass_markers: allow-* バイパスマーカーの sanitize 前検出・review-prompt.yaml 一覧掲載のテスト (#4147)",
+    "target_fix_4147_sanitize_marker_removal: sanitize_untrusted_text() が正規バイパスマーカーも除去する現状仕様の回帰テスト (#4147)",
+    "target_issue_4138: mermaid-lint/docs判定の内部merge gateとPreToolUse hookの非対称性を解消する振る舞いテスト (#4138)",
+    "target_fix_4138_mermaid_gate_symmetry: mermaid-lint/docs 必須判定の内部merge gateとPreToolUse hookの非対称性回帰テスト (#4138)",
+    "target_fix_4138_mermaid_lint_status_on_skip: mermaid-lint skip時のcommit status未送信を解消する回帰テスト (#4138)",
+    "target_issue_4102: .clasp.json を git 追跡下に入れて clone 直後に clasp push できるようにする振る舞いテスト (#4102)",
+    "target_issue_4094: commit status 投稿の権限不足を検知する振る舞いテスト (#4094)",
+    "target_pre_flight_untracked_decision_journals: pre-flight の docs/decisions/ 未追跡ファイル検査（非ブロッキング WARN）のテスト (#4077)",
+    "target_fix_4090_worktree_mise_stub_repo_config: worktree-mise-stub-path のリポジトリ設定優先を検証する回帰テスト (#4090)",
+    "target_fix_4099_loop_error_repo_isolation: ループエラーログをリポジトリ単位で記録・集計する回帰テスト (#4099)",
+    "target_issue_4097: tests for pytest full-suite fail-closed locking",
+    "target_issue_4160: post_test_status の子 pytest subprocess への再帰ガード伝播の振る舞いテスト (#4160)",
+    "target_issue_4207: PytestFlockContext が Windows 実機ネイティブで msvcrt.locking() による実ロックを取得する振る舞いテスト (#4207)",
+    "target_issue_4089: verdict 継続コマンドのトークン欠落時 degrade（gh pr comment フォールバック）の振る舞いテスト (#4089)",
+    "target_issue_4052: pre-commit-autoupdate workflow に sync-pre-commit-rev ステップを統合する振る舞いテスト (#4052)",
+    "target_sync_pre_commit_rev: sync-pre-commit-rev サブコマンド（root の pre-commit hook rev をテンプレへ反映）の振る舞いテスト (#4051)",
+    "target_issue_4025: detect-secrets-check サブコマンド（baseline 照合による秘密情報混入検知）の振る舞いテスト (#4025)",
+    "target_fix_3996_size_gate_real_additions: ai-review size gate が古い size/XXL ラベルを見て分割後も発火し続ける不具合の回帰テスト (#3996)",
+    "target_fix_3994_size_gate_empty_reason_and_threshold_drift: PR #4006 レビュー指摘（size_gate.py の空理由バイパス・warn-diff-size.py の閾値ハードコード）の回帰テスト (#3994)",
+    "target_fix_3991_preflight_vendor_no_tests: pre-flight の mypy/pytest が tests/ 非同梱の vendor project で構造的に失敗する不具合の回帰テスト (#3991)",
+    "target_issue_3957: commit status 投稿の gh api タイムアウトが SubprocessTimeoutError で tidd ai-review を異常終了させない振る舞いテスト (#3957)",
+    "target_fix_3957_commit_status_timeout_retry: shared/gh_client.py::commit_status_create の SubprocessTimeoutError リトライ実装の回帰テスト (#3957)",
+    "target_fix_3957_bats_commit_status_timeout_retry: ai_review/test_statuses.py::_post_bats_commit_status の SubprocessTimeoutError 未捕捉の回帰テスト (#3957)",
+    "target_fix_3898_venv_bin_bare_literal: venv_bin_hardcode が末尾スラッシュのない `.venv/bin` 単体リテラルを検出できず --strict gate をすり抜ける不具合の回帰テスト (#3898)",
+    "target_fix_3898_normalized_prefix_regex: posix_path_assumption が as_posix() 正規化済み変数にのみ適用する prefix 正規表現を誤検出して --strict gate が誤ブロックする不具合の回帰テスト (#3898)",
+    "target_fix_3898_url_regex_false_positive: posix_path_assumption が URL 正規表現を誤検出して --strict gate が誤ブロックする不具合の回帰テスト (#3898)",
+    "target_fix_3898_posix_normalize_line_order: posix_path_assumption の as_posix() 正規化判定が行順を無視して検出を抑制する不具合の回帰テスト (#3898)",
+    "target_fix_3898_inline_prefix_regex: posix_path_assumption が inline の prefix 正規表現で適用先の as_posix() 正規化を見ず誤検出して --strict gate が誤ブロックする不具合の回帰テスト (#3898)",
+    "target_fix_3898_prefix_regex_expr_arg: posix_path_assumption の prefix 正規表現の誤検知抑制が単純変数の適用先しか見ず、as_posix() 式を直接渡すコードを誤検出する不具合の回帰テスト (#3898)",
+    "target_fix_3890_hook_windows_path_normalize: hook のパス判定が Windows バックスラッシュ区切りに不一致でテスト保護ゲートが失効する不具合の回帰テスト (#3890)",
+    "target_fix_3894_windows_home_isolation: テストの HOME 隔離が Windows で効かず実ユーザーのキャッシュを汚染する不具合の回帰テスト (#3894)",
+    "target_issue_3894: テストの HOME 隔離が Windows で効かず実ユーザーのキャッシュを汚染する不具合の振る舞いテスト (#3894)",
+    "target_issue_3869: mise-worktree-bridge.bash が自身の配置場所からリポジトリルートを動的解決する振る舞いテスト (#3869)",
+    "target_issue_3899: mise-worktree-bridge.bash が Git Bash で PATH を破壊しないことの振る舞いテスト (#3899)",
+    "target_fix_3880_windows_native_compat: Windows ネイティブでの subprocess.run(text=True) UnicodeDecodeError・os.kill シグナル0非互換・fcntl collection失敗・flock依存テストの回帰テスト (#3880)",
+    "target_fix_3866_subprocess_encoding_utf8: ai_review 配下の subprocess.run(text=True) に encoding=\"utf-8\" が明示されていることの回帰テスト (#3866)",
+    "target_fix_3872_subprocess_encoding_utf8: tidd_tools 本体 14 ファイルの subprocess.run(text=True) に encoding=\"utf-8\" が明示されていることの回帰テスト (#3872)",
+    "target_fix_3895_hooks_subprocess_encoding_utf8: .claude/hooks 配下（_lib 含む）の subprocess 呼び出しに encoding=\"utf-8\" が明示されていることの回帰テスト (#3895)",
+    "target_issue_3895: .claude/hooks 配下の subprocess デコード・stdout/stderr cp932 事故の振る舞いテスト (#3895)",
+    "target_codex_create_issue_contract: create-issue の Codex custom agent 呼び出し契約 (#3842)",
+    "target_test_fix_3838_review_posting_format: ai-review の primary/secondary/consensus/fallback 投稿フォーマット回帰テスト (#3838)",
+    "target_fix_3827_agy_account_default_model: agy バックエンドをアカウント既定モデルに追従させ --log-file 抽出で実使用モデル名を記録する回帰テスト (#3827)",
+    "target_fix_3827_agy_sonnet_log_resolution: agy-sonnet 実使用モデルのログ解決テスト (#3827)",
+    "target_fix_3793_merge_summary_owner_gh: merge_summary.py の owner 文字列に 'GitHub MCP' リテラルが残っていないことの回帰テスト (#3793)",
+    "target_issue_3830: codex バックエンドのモデル指定を luna tier 自動解決に切り替える振る舞いテスト (#3830)",
+    "target_backend_codex_luna_tier: codex debug models カタログ解析・tier 選定・ログ抽出の単体テスト (#3830)",
+    "target_fix_3808_pr_edit_body_raw_field: gh_client.pr_edit_body の -f/-F 意味論バグ回帰テスト (#3808)",
+    "target_fix_3783: removes unreachable mcp__github__* hook matcher entries from .rulesync/hooks.jsonc and generated settings (#3783)",
+    "target_issue_3816: Codex CLI セッションでの step4-pr-created 記録欠落を Stop hook 経由で補完する振る舞いテスト (#3816)",
+    "target_fix_3766_verify_post_merge_skill_distribution: verify-post-merge skill/post-merge-verifier agent consumer distribution and health_check consistency regression tests (#3766)",
+    "target_fix_3763_yaru_verifier_codex_distribution: yaru_verifier.toml codex distribution and health_check consistency regression tests (#3763)",
+    "target_issue_3763: yaru-auto-tick unavailable message includes reason and searched path (#3763)",
+    "target_fix_3761_session_start_venv_init: session-start-venv-init consumer distribution and project detection (#3761)",
+    "target_research_doc_skill: tests for the research-doc skill contract (#3752)",
+    "target_test_plan: tests that exercise the test-plan subcommand (Phase 1 pilot)",
+    "target_test_output_capture: tests for test_output_capture.py quiet capture (#3426)",
+    "target_shared: tests that exercise tidd_tools.shared modules (Phase 2-A foundation)",
+    "target_gh_client: tests for shared/gh_client.py token= kwarg and added APIs (#2940)",
+    "target_subprocess_timeouts: shared/subprocess_timeouts.py の named timeout 定数テスト (#2965)",
+    "target_checklist: shared/checklist.py の分類ロジック単一ソース化テスト (#2942)",
+    "target_issue_body: shared/issue_body.py の closes/セクション/未チェック項目パーサ単一ソース化テスト (#2943)",
+    "target_app_config: shared/app_config.py の config.json 読み書き・hook-groups.yaml 解析単一ソース化テスト (#2947)",
+    "target_ban_shell_files: tests for the ban-shell-files hook (#1091)",
+    "target_check_no_shell_files: tests for the check-no-shell-files subcommand (#1091)",
+    "target_issue_next_state: tests for the issue-next-state subcommand (#1054 Phase 2-B)",
+    "target_issue_next_all_loop: scripts/issue-next-all-loop.py 最小ループ（起動・空候補終了）の振る舞いテスト (#4228)",
+    "target_issue_3372_clear_park_exemption: tests for issue-next-state clear STEP 5 park (PR作成後close・未マージ) 免除 (#3372)",
+    "target_loop_error_log: tests for the loop-error-log subcommand (#1054 Phase 2-B)",
+    "target_check_pr_conflicts: tests for the check-pr-conflicts subcommand (#1054 Phase 2-B)",
+    "target_classify_test_failure: tests for the classify-test-failure subcommand (#3631)",
+    "target_issue_3454_default_parallel_limit: 並行 PR 上限デフォルト値の境界値テスト (#3454)",
+    "target_analyze_performance: tests for the analyze-performance subcommand (#1055 Phase 2-C)",
+    "target_analyze_loop_errors: tests for the analyze-loop-errors subcommand (#1055 Phase 2-C)",
+    "target_watch_circleci_failures: tests for the watch-circleci-failures subcommand (#1055 Phase 2-C)",
+    "target_wait_ci: tests for the wait-ci subcommand (#3645)",
+    "target_ai_review: tests for the ai-review subcommand (#1056 Phase 3)",
+    "target_ai_fallback_reviewer: ai-fallback-reviewer.md が review-prompt.yaml を参照するか検証 (#1696)",
+    "target_ai_review_jwt: ai-review jwt 生成テスト (#1056 Phase 3)",
+    "target_ai_review_tokens: ai-review installation token テスト (#1056 Phase 3)",
+    "target_ai_review_prompts: ai-review プロンプト組み立てテスト (#1056 Phase 3)",
+    "target_ai_review_backends: ai-review バックエンドチェーンテスト (#1056 Phase 3)",
+    "target_codex_output_consolidation: extract_codex_text / _fetch_pr_diff の backends.py・yaru_auto_tick.py 間重複解消テスト (#2963)",
+    "target_ai_review_verdict: ai-review VERDICT パース・指摘事項抽出テスト (#1056 Phase 3)",
+    "target_ai_review_quota: ai-review クォータキャッシュテスト (#1056 Phase 3)",
+    "target_ai_review_reviewdog: ai-review rdjson 変換・インライン投稿テスト (#1056 Phase 3)",
+    "target_ai_review_escalation: ai-review エスカレーション・Slack 通知テスト (#1056 Phase 3)",
+    "target_ai_review_timing: ai-review timing.json 保存テスト (#1056 Phase 3)",
+    "target_ai_review_timing_steps: ai-review ステップ別 timing 計測テスト (#2100)",
+    "target_ai_review_post_review: ai-review GitHub レビュー投稿テスト (#1056 Phase 3)",
+    "target_ai_review_subcommands: ai-review --post-comment / --continue-with-verdict テスト (#1056 Phase 3)",
+    "target_ai_review_core: ai-review メインフロー統合テスト (#1056 Phase 3)",
+    "target_ai_review_core_check_runs: _check_commit_status_gate の native GitHub Actions CheckRun 検査テスト (#3725)",
+    "target_ai_review_lint_statuses: ai-review linter/formatter Commit Status 投稿テスト (#1851)",
+    "target_ai_review_orphan: ai-review 中断検知テスト (#1232)",
+    "target_ai_review_verify_ai_confirm: ai-review [AI確認] 自律検証テスト (#1246)",
+    "target_ai_review_fallback_formatter: ai-review Claude fallback JSON→markdown 変換テスト (#1697)",
+    "target_ai_review_model_drift: ai-review agy invalid model selection ドリフト検知テスト (#2380)",
+    "target_ai_review_review_dedup: ai-review 同一 SHA 重複レビュー投稿防止テスト (#2419)",
+    "target_ai_review_approve_flow: ai-review APPROVE 確定後マージフロー統合実装（approve_flow）テスト (#2941)",
+    "target_fix_3787_convert_manual_to_post_merge: approve_flow._convert_manual_to_post_merge gh_client 経由化・silent fail 解消の回帰テスト (#3787)",
+    "target_secrets: tests for the shared/secrets.py common resolution layer (#1630)",  # pragma: allowlist secret
+    "target_collect_env_snapshot: tests for the collect-env-snapshot subcommand (#1057 Phase 4)",
+    "target_report_test_status: tests for the report-test-status subcommand (#1057 Phase 4)",
+    "target_run_project_tests: tests for the run-project-tests subcommand (#1057 Phase 4)",
+    "target_screenshot_attach: tests for the screenshot-attach subcommand (#1057 Phase 4)",
+    "target_lint_hardcoded_repo: tests for the lint-hardcoded-repo subcommand (#1057 Phase 4)",
+    "target_win_compat_scan: tests for the win-compat-scan subcommand (#1092)",
+    "target_sandbox_copier_poc: tests for the sandbox-copier-poc subcommand (#1206 Phase 1)",
+    "target_settings_managed_hook_registration: tests for settings.managed.json.jinja hook registration drift detection (#2229)",
+    "target_template_rulesync_drift: tests for rulesync source distribution in the copier template (#3333)",
+    "target_copier_update: tests for the copier-update subcommand (#1224)",
+    "target_notify_copier_staleness: tests for notify-copier-staleness.py hook (#1224)",
+    "target_issue_quality_check: tests for the issue-quality-check subcommand (#1245)",
+    "target_llm_issue_body: tests for the shared LLM issue body enhancer (#1247)",
+    "target_on_stop: tests for the on-stop.py hook throttle (#1265)",
+    "target_require_issue_next_completion: tests for the require-issue-next-completion.py Stop hook (#2321)",
+    "target_cli_contract: CLI 契約テスト（--help golden / exit code / フラグ存在, #1291）",
+    "target_ban_anthropic_import: tests for the ban-anthropic-import hook (#1281)",
+    "target_ban_hardcoded_repo: tests for the ban-hardcoded-repo hook (#1642)",
+    "target_hardcoded_repo_drift_contract: lint-hardcoded-repo と ban-hardcoded-repo hook の判定一致契約テスト (#2944)",
+    "target_issue_2944: issue-2944.feature の step_defs テスト (#2944)",
+    "target_ban_ng_words: tests for the ban-ng-words hook (#2308)",
+    "target_ban_parents_n: tests for the ban-parents-n hook (#1423)",
+    "target_ban_timing_mark_instruction: tests for the ban-timing-mark-instruction hook (#3559)",
+    "target_label_pr: tests for the label-pr.py hook silent-fail fix (#1295)",
+    "target_hook_inprocess: hook契約テストのin-process実行ヘルパー契約テスト (#2974)",
+    "target_gherkin_markers: Gherkin 必須観測要素 positive list テスト (#1305)",
+    "target_validate_issue: validate-issue.py hook の section 検知 regex テスト (#1328)",
+    "target_extract_feature: extract-feature サブコマンドテスト (#1283)",
+    "target_xfail_status: xfail-status サブコマンドテスト (#1553)",
+    "target_step_defs_backfill: step_defs skeleton backfill 状態検証テスト (#1548)",
+    "target_audit_mutmut_review: audit-mutmut-review サブコマンドテスト (#1300)",
+    "target_session_detector: session_detector.is_claude_code_session() テスト (#1304)",
+    "target_require_red_first: require-red-first hook テスト (#1285)",
+    "target_require_worktree_for_edit: require-worktree-for-edit hook 契約テスト (#3445)",
+    "target_hook_json_schema: Hook JSON payload schema validation テスト (#1292)",
+    "target_protect_tests: protect-tests hook 拡張テスト (#1293)",
+    "target_verdict_canary: Canary 回帰テスト（LLM 呼び出しなし・fixture ベース）(#1289)",
+    "target_config_schema: .claude/settings.json 構造バリデーションテスト (#1294)",
+    "target_gh_cache: gh_cache stale-while-revalidate + WAL テスト (#1393)",
+    "target_require_issue: require-issue hook 契約テスト (#1393)",
+    "target_auto_ruff_format: auto-ruff-format hook fresh worktree silent 失敗 fix テスト (#1403)",
+    "target_fix_1890: auto-ruff-format --with ruff ネットワーク断 silent 失敗 fix テスト (#1890)",
+    "target_require_ruff_format: require-ruff-format hook 契約テスト (#1752)",
+    "target_require_mypy: require-mypy hook 契約テスト (#1892)",
+    "target_yaru_merge_gate: yaru_merge_gate merge gate モジュールテスト (#1756)",
+    "target_duplicate_detector: duplicate-detector subagent frontmatter 契約テスト (#1413)",
+    "target_verify_post_merge: verify-post-merge サブコマンドテスト (#1402)",
+    "target_weekly_audit: weekly-audit サブコマンド契約テスト (#1282)",
+    "target_human_queue: human-queue サブコマンド契約テスト (#1577)",
+    "target_hook_io: hook_io.get_tool_output schema mismatch fix テスト (#1596)",
+    "target_hook_enable_config: hook 機能別 on/off 機構（is_hook_enabled + config.json）テスト (#1633)",
+    "target_ban_claude_p: ban-claude-p hook メッセージ改善テスト (#1622)",
+    "target_review_prompt_schema: review-prompt.yaml schema 検証テスト (#1648)",
+    "target_build_prompt: build_prompt backend 分岐撤去・全 backend に review-prompt.yaml 適用テスト (#1649)",
+    "target_configure: tidd configure 対話ウィザード + --set/--show テスト (#1634)",
+    "target_label_pr_slo: label-pr-slo SLO チェックサブコマンドテスト (#1605)",
+    "target_validate_issue_source_label: validate-issue.py の source: ラベル強制チェックテスト (#1627)",
+    "target_validate_issue_title_prefix_optional: validate-issue.py の 🤖 prefix 廃止（prefix 任意化）境界値契約テスト (#2072)",
+    "target_bypass_audit: バイパス監査ログ機能テスト (bypass_audit.py + weekly-audit bypass-summary) (#1625)",
+    "target_embedding_prefilter: ローカル埋め込み pre-filter ユニットテスト (#1626)",
+    "target_detect_duplicates_batch: detect-duplicates-batch サブコマンドテスト (#1466, #1778)",
+    "target_issue_1750: quota-exceeded を fallback trigger として扱い loop-error に記録しない (#1750)",
+    "target_validate_skill: validate-skill.py hook 契約テスト (#1764)",
+    "target_detect_rule_bloat: detect-rule-bloat.py hook 契約テスト (#1772)",
+    "target_context_budget: context-budget サブコマンド + 静的コンテキスト予算ゲートのテスト (#1883)",
+    "target_skill_checker: skill-checker 共通モジュール + SKILL.md PR ゲートのテスト (#2112)",
+    "target_context_usage: context-usage 週次実測レポート + 消費増アラート Issue 起票のテスト (#1884)",
+    "target_backends_state_dir: backends._save_backend_log / _write_backend_name デフォルト出力先テスト (#1802)",
+    "target_notify_template_sync: notify-template-sync.py hook 契約テスト (#1775)",
+    "target_extract_bash_fixtures: _extract_bash_fixtures.py 動的 fixture 生成テスト (#1786)",
+    "target_require_issue_id_in_pr_title: require-issue-id-in-pr-title hook 契約テスト (#1840)",
+    "target_issue_next_stop_condition: issue-next 停止条件ファイルゲート廃止確認テスト (#1838)",
+    "target_post_test_status: post-test-status サブコマンドテスト (#1839)",
+    "target_yaru_auto_tick: yaru_auto_tick モジュールテスト (#1534, #1868)",
+    "target_fix_1928: REQUIRED_FILES と templates/workflow の整合性回帰テスト (#1928)",
+    "target_issue_1863: ruff lint エラー一括修正の振る舞いテスト (#1863)",
+    "target_issue_2484: test_issue_1863 の worktree 互換性テスト (#2484)",
+    "target_fix_1918: context-usage alert 起票失敗 fail-loud 化の回帰テスト (#1918)",
+    "target_fix_1930: ban-hardcoded-repo hook add+commit 連結バイパスの回帰テスト (#1930)",
+    "target_fix_1943: nightly pytest の CIRCLE_* env リーク隔離メタテスト (#1943)",
+    "target_fix_1947: label-pr hook worktree ブランチ誤検出の回帰テスト (#1947)",
+    "target_issue_1649: 全 backend で review-prompt.yaml を適用する振る舞いテスト (#1649)",
+    "target_issue_1605: label-pr SLO ジョブが直近 merged PR のラベル付与率を機械検知する振る舞いテスト (#1605)",
+    "target_fix_1859_mypy_strict: mypy strict 修正の振る舞いテスト (#1859)",
+    "target_sanitize: 非信頼テキストサニタイズの契約テスト (#1845)",
+    "target_tick_evidence: tick-evidence サブコマンドの契約・振る舞いテスト (#1921)",
+    "target_issue_1533: gh issue close 時の やること checkbox 消化強制 hook の振る舞いテスト (#1533)",
+    "target_issue_1534: ai-review APPROVE 時の evidence-based auto-tick の振る舞いテスト (#1534)",
+    "target_issue_1756: Issue やること 全消化を merge gate にする振る舞いテスト (#1756)",
+    "target_issue_1402: post-merge AI 確認ワークフローの振る舞いテスト (#1402)",
+    "target_issue_1967: verify-post-merge Issue 量産防止の振る舞いテスト (#1967)",
+    "target_fix_1967: verify-post-merge Issue 量産バグの回帰テスト (#1967)",
+    "target_issue_1994: config.json による自動化 on/off 統一管理の振る舞いテスト (#1994)",
+    "target_issue_2017: yaru auto-tick の evidence 表コメント投稿の振る舞いテスト (#2017)",
+    "target_lead_time: tidd lead-time サブコマンドのテスト (#2006)",
+    "target_issue_2006: tidd lead-time サブコマンドの振る舞いテスト (#2006)",
+    "target_transfer_issue_test_items: Issue やること内テスト項目の 2 段構え自動転記の振る舞いテスト (#2026)",
+    "target_test_status_gate: ai-review テスト status gate（pytest/jest commit status 事前チェック）のテスト (#1982)",
+    "target_test_status_gate_check_runs: test_status_gate.py の check_runs_failed（native GitHub Actions CheckRun 検査）テスト (#3725)",
+    "target_gates: ai-review gate 関数群（check_*_gate）の exit code 契約テスト (#3628)",
+    "target_pre_flight: pre-flight サブコマンド（PR 作成前ローカルチェック）のテスト (#1997)",
+    "target_issue_1688: レビューフッターにモデル名・バージョンを統一フォーマットで記録する振る舞いテスト (#1688)",
+    "target_issue_1697: Claude fallback JSON verdict が agy/codex 互換 markdown に変換される振る舞いテスト (#1697)",
+    "target_issue_1851: linter/formatter の GitHub Commit Status 投稿の振る舞いテスト (#1851)",
+    "target_issue_1630: 秘匿情報の共通解決レイヤー（get_secret）の振る舞いテスト (#1630)",
+    "target_issue_1634: tidd configure 対話ウィザードの振る舞いテスト (#1634)",
+    "target_issue_1282: /weekly-audit AI review drift 検知の振る舞いテスト (#1282)",
+    "target_issue_1466: /detect-duplicates batch 処理の振る舞いテスト (#1466)",
+    "target_issue_1626: ローカル埋め込み pre-filter の振る舞いテスト (#1626)",
+    "target_issue_1621: 起票歩留まり KPI 計測の振る舞いテスト (#1621)",
+    "target_issue_1476: Copier template drift CI 検知の振る舞いテスト (#1476)",
+    "target_issue_1641: copier.yml 組織固有値質問（github_org / notification_email）の振る舞いテスト (#1641)",
+    "target_issue_1643: Technology Radar gist URL の consumer 対応の振る舞いテスト (#1643)",
+    "target_issue_1786: _extract_bash_fixtures 動的 fixture 生成の振る舞いテスト (#1786)",
+    "target_issue_1790: CODEX_REASONING_EFFORT 環境変数による reasoning effort 制御の振る舞いテスト (#1790)",
+    "target_issue_1988: agy プロンプト stdin 渡しで E2BIG 根本解消の振る舞いテスト (#1988)",
+    "target_issue_2074: parser critical PR（continue_with_verdict 経路）の lint/pytest/jest commit status 投稿の振る舞いテスト (#2074)",
+    "target_issue_2101: pre-flight ステップ別 timing 計測を #2100 jsonl 基盤に統合する振る舞いテスト (#2101)",
+    "target_ai_review_timing_report: tidd ai-review-timing --report サブコマンドのテスト (#2102)",
+    "target_issue_2102: tidd ai-review-timing --report サブコマンドの振る舞いテスト (#2102)",
+    "target_require_merge_ci_status: require-merge-ci-status.py hook 契約テスト (#2086)",
+    "target_require_merge_ci_status_mermaid: require-merge-ci-status.py mermaid-lint/docs 必須化テスト (#2794)",
+    "target_require_merge_ci_status_check_runs: require-merge-ci-status.py native GitHub Actions CheckRun 検査テスト (#3725)",
+    "target_require_pr_state_drift_check: require-pr-state-drift-check.py hook 契約テスト (#4038)",
+    "target_block_dangerous_git: block-dangerous-git.py hook 契約テスト (#1614)",
+    "target_detect_ai_confirm_misuse: detect-ai-confirm-misuse.py hook 契約テスト (#1618)",
+    "target_post_test_statuses: post-test-statuses の振る舞いテスト (#1984)",
+    "target_fix_2075: Issue #2075 の回帰テスト",
+    "target_fix_2083: Issue #2083 の回帰テスト",
+    "target_fix_2089: Issue #2089 の回帰テスト",
+    "target_fix_2095: Issue #2095 の回帰テスト",
+    "target_session_start_cache: session-start-cache の振る舞いテスト (#1459)",
+    "target_session_start_health_check: session-start-cache.py の health-check 組み込み契約テスト (#2205)",
+    "target_session_start_health_check_fallback: session-start-cache.py の uv tool install フォールバック契約テスト (#2211)",
+    "target_check_template_drift: check-template-drift の振る舞いテスト",
+    "target_override_markers: override-markers の振る舞いテスト",
+    "target_require_yaru_consistency: require-yaru-consistency.py hook 契約テスト",
+    "target_ai_review_consensus_cache: ai-review consensus.json 境界値テスト (#2081)",
+    "target_ai_review_sha_cache_hit: ai-review SHA 不変時キャッシュヒットパスの exit code テスト (#2081)",
+    "target_config: config サブコマンド（init/enable/disable/show）の振る舞いテスト (#2359)",
+    "target_analyze_loop_on_stop: analyze-loop-on-stop.py hook の is_hook_enabled 契約テスト (#2167)",
+    "target_venv_repair: .venv Python バージョン不整合の起動時自動修復テスト (#2178)",
+    "target_issue_2191: pre-flight/ai-review の pytest 実行を pytest-xdist で並列化する振る舞いテスト (#2191)",
+    "target_issue_2192: ai-review 再実行（attempt>=2）でも test-plan を再実行し新しい head SHA に commit status を投稿する振る舞いテスト (#2192)",
+    "target_issue_2311: pytest フルスイートを同一 commit SHA に対して 1 回だけ実行する振る舞いテスト (#2311)",
+    "target_health_check: tidd health-check サブコマンド（workflow 動作依存の自動検証）のテスト (#2205)",
+    "target_repo_bootstrap: tidd repo-bootstrap サブコマンド（ラベル/merge 設定の冪等ブートストラップ）のテスト (#2219)",
+    "target_issue_2257: copier で Python プロジェクト雛形（pytest-bdd 込み）を配布する振る舞いテスト (#2257)",
+    "target_issue_2254: copier の ci_provider 質問で GitHub Actions CI テンプレートが条件配布される振る舞いテスト (#2254)",
+    "target_copier_precommit: copier で pre-commit + detect-secrets 一式が配布される振る舞いテスト (#2256)",
+    "target_issue_2264: ci_provider=github-actions かつ primary_language!=Python でも ci.yml が壊れないことの振る舞いテスト (#2264)",
+    "target_issue_3702: ci.yml テンプレートに concurrency グループ（二重実行防止）が含まれる振る舞いテスト (#3702)",
+    "target_issue_3726: ci.yml テンプレートの pull_request に paths フィルタ（ファイル変更検出スコープ）が含まれる振る舞いテスト (#3726)",
+    "target_issue_2255: copier テンプレートで .github/dependabot.yml を配布する振る舞いテスト (#2255)",
+    "target_consumer_init: tidd consumer-init サブコマンド（新規 consumer 立ち上げオーケストレーション）のテスト (#2252)",
+    "target_issue_2259: 配布ファイルの相対リンクが consumer で解決できることを検証する振る舞いテスト (#2259)",
+    "target_fix_2272: Issue #2272 の回帰テスト",
+    "target_issue_2274: copier flag で CodeRabbit 設定（.coderabbit.yaml）を配布する振る舞いテスト (#2274)",
+    "target_issue_2276: copier flag で SECURITY.md を public consumer に配布する振る舞いテスト (#2276)",
+    "target_issue_2277: copier flag で OpenSSF Scorecard workflow を public consumer に配布する振る舞いテスト (#2277)",
+    "target_issue_2280: 配布 dependabot.yml に major version update を除外するオプションを追加する振る舞いテスト (#2280)",
+    "target_fix_2292: Issue #2292 の回帰テスト",
+    "target_fix_2295: Issue #2295 の回帰テスト",
+    "target_fix_2298: Issue #2298 の回帰テスト",
+    "target_fix_2300: Issue #2300 の回帰テスト",
+    "target_issue_next_timing: issue-next-timing サブコマンド・mark_boundary の境界計測テスト (#2312)",
+    "target_merge_summary: merge-summary サブコマンド・所要時間サマリ表フォーマットのテスト (#2313)",
+    "target_issue_2314: codex primary review の投稿順序と Reviewer フッタのモデル名表示の振る舞いテスト (#2314)",
+    "target_auto_tick_issue_items: auto-tick-issue-items.py hook 契約テスト (#2315)",
+    "target_require_preflight_marker: require-preflight-marker.py hook 契約テスト (#2328)",
+    "target_issue_2352: 既存 .github/dependabot.yml を copier update で上書きしない _skip_if_exists 保護の振る舞いテスト (#2352)",
+    "target_resume_candidates: resume-candidates サブコマンド（needs-human-merge PR 照会）の振る舞いテスト (#2375)",
+    "target_issue_2376: yaru-verifier 撤去型・見送り型・0件エビデンス型 auto-tick の振る舞いテスト (#2376)",
+    "target_issue_2355: root CLAUDE.md が Copier 対象外になる振る舞いテスト (#2355)",
+    "target_issue_2357: .github/settings.yml が safe-settings 前提で配布される振る舞いテスト (#2357)",
+    "target_config_github_mcp: tidd config disable/enable github-mcp の振る舞いテスト (#2360)",
+    "target_codex_config_toml: .codex/config.toml 構造バリデーションテスト (#3205)",
+    "target_issue_2361: .gitleaks.toml が Copier で配布されない振る舞いテスト (#2361)",
+    "target_issue_2365: skills/agents 配布が機能グループ単位で opt-in できる振る舞いテスト (#2365)",
+    "target_issue_2369: 既存 projects/py/* がある consumer で python 雛形配布がスキップされる振る舞いテスト (#2369)",
+    "target_cleanup_merged_branch: tidd cleanup-merged-branch サブコマンドの振る舞いテスト (#2370)",
+    "target_issue_2391: merge-summary report 未実行時に issue-next-state clear をブロックする振る舞いテスト (#2391)",
+    "target_issue_2389: check-liveness が naive ISO 日時で crash しないよう防御する振る舞いテスト (#2389)",
+    "target_issue_2400: tidd configure の config 読み込みにも hooks-config.json migration を適用する振る舞いテスト (#2400)",
+    "target_issue_2449: pre-flight pytest マーカーが tree hash ベースで cache hit する振る舞いテスト (#2449)",
+    "target_pre_flight_tree_hash: dirty tree で書く tree hash マーカーを ai-review 側の cache lookup がそのまま参照できることの単体テスト (#2449)",
+    "target_pre_flight_tree_hash_sha_marker: tree-hash marker hit で pytest が skip されても clean tree なら SHA マーカーを補完する regression test (#3504)",
+    "target_ai_review_tree_hash_cache: has_fresh_preflight_tree_marker の境界値・_post_test_statuses の tree/SHA マーカー優先順位の単体テスト (#2449)",
+    "target_pre_flight_doc_only_marker: doc-only 変更でも pre-flight 成功時に push 用マーカーを書く振る舞いテスト (#3458)",
+    "target_pre_flight_no_py_project_marker: python変更なし・doc-onlyでもない変更でも pre-flight 成功時に push 用マーカーを書く振る舞いテスト (#3468)",
+    "target_pre_flight_static_check_failfast: 静的チェック失敗確定時に pytest / Jest 実行をスキップする fail-fast の振る舞いテスト (#3453)",
+    "target_pre_flight_npm_cooldown: 依存更新バージョンの公開日 cooldown ゲートの単体テスト (#3439)",
+    "target_pre_flight_npm_cooldown_allowlist: npm-cooldown ゲートの既知パッケージ許可リストの単体テスト (#3498)",
+    "target_issue_2451_agent_definitions: issue-implementer / issue-fixer agent定義のfrontmatter契約テスト (#2451)",
+    "target_issue_2477: GAS プロジェクトの .claspignore が Node.js 専用ファイルを除外する振る舞いテスト (#2477)",
+    "target_backends: agy/codex backend availability config.json 一元管理テスト (#2495)",
+    "target_issue_2461_agent_doc: issue-implementer.md 実行手順への timing mark 呼び出し組み込み契約テスト (#2461)",
+    "target_fix_2478: ruff 依存を厳密ピンし版ドリフトによる nightly pytest 不安定失敗を防ぐ回帰テスト (#2478)",
+    "target_fix_2513: size/XXL gate が attempt >= 2 で素通りせず bot review で発火することの回帰テスト (#2513)",
+    "target_fix_2520: nightly-tests の EXE001 / utcfromtimestamp DeprecationWarning 失敗の回帰テスト (#2520)",
+    "target_fix_2527: codex stub が fake APPROVE を返してマージされるバグの回帰テスト (#2527)",
+    "target_deprecated_config_registry: 廃止済み設定残存検知（health-check / config show）の振る舞いテスト (#2531)",
+    "target_ai_review_state_dir: ai-review STATE_DIR 解決共通ヘルパー（basename 検証・PR 番号不一致エラー）のテスト (#2529)",
+    "target_fix_2536: exit 3 の一時的/恒久的区別と恒久的破損の loop-error 記録の振る舞いテスト (#2536)",
+    "target_fix_2541: 明示的に無効化した backend を恒久的破損として扱わない振る舞いテスト (#2541)",
+    "target_fix_2535: 正常レビュー本文と空出力がクォータ超過と誤判定されるバグの回帰テスト (#2535)",
+    "target_fix_2530: verdict 確定時に実レビュー由来を検証して fake APPROVE を棄却する振る舞いテスト (#2530)",
+    "target_block_subagent_review_merge: subagent からの ai-review / pr merge をブロックする hook の契約テスト (#2542)",
+    "target_block_unauthorized_fallback_review: exit 3 の証跡なしでの ai-fallback-reviewer 起動をブロックする hook の契約テスト (#3629)",
+    "target_ai_review_backend_unavailable_flag: exit 3 証跡フラグ（backend-unavailable）の作成・削除のテスト (#3629)",
+    "target_fix_2543: bare な Issue 番号で merge-summary report した後に clear が成功する回帰テスト (#2543)",
+    "target_issue_2543: merge-summary report が呼び出し形式によらずマーカーを書く振る舞いテスト (#2543)",
+    "target_doc_scan: 廃止済み env var の設定指示がドキュメント・テンプレートに残らない走査テスト (#2534)",
+    "target_issue_2522: pre-flight 自動タイミング記録と merge-summary report の PR フォールバックの振る舞いテスト (#2522)",
+    "target_issue_2523: parser critical PR の最終 verdict 投稿を post_review() に一本化する振る舞いテスト (#2523)",
+    "target_fix_2558: scripts/ と fixtures/ の shebang 付きファイルの実行ビット欠落による EXE001 nightly 失敗の回帰テスト (#2558)",
+    "target_issue_2550: codex JSONL 封筒検証の stderr 混入誤棄却修正の振る舞いテスト (#2550)",
+    "target_retry: 指数バックオフ付きリトライ共通ユーティリティのユニットテスト (#2567)",
+    "target_fix_2562: uv.lock git 管理化による版ドリフト解消の回帰テスト (#2562)",
+    "target_check_dependency_allowlist: pyproject.toml への許可リスト外依存追加をブロックする hook の契約テスト (#2561)",
+    "target_issue_2578: tidd CLI リファレンス自動生成と pre-flight drift 検知の振る舞いテスト (#2578)",
+    "target_docs_sync: tidd docs-sync サブコマンド（CLI リファレンス自動生成）のテスト (#2578)",
+    "target_issue_2580: src 変更あり docs 変更なし PR を pre-flight でブロックする振る舞いテスト (#2580)",
+    "target_session_start_venv_init: session-start-venv-init.py hook の契約テスト (#2596)",
+    "target_fix_2576: block-dangerous-git.py が heredoc 本文中の文字列に誤反応するバグの回帰テスト (#2576)",
+    "target_fix_2608: block-dangerous-git.py の heredoc 開始検出がビットシフト・herestring に誤マッチするバグの回帰テスト (#2608)",
+    "target_issue_2579: hooks.md 一覧と .claude/hooks/ 実装の drift を pre-flight で検知する振る舞いテスト (#2579)",
+    "target_scope_diff_checker: Issue やること×PR diff 突き合わせ（scope-diff-checker）の契約テスト (#2597)",
+    "target_gas_coverage_gate: GAS project の Jest coverageProvider/coverageThreshold 設定検証テスト (#2586)",
+    "target_stop_before_merge: --stop-before-merge フラグによるマージ前停止の振る舞いテスト (#2645)",
+    "target_issue_2658: cwv-approved フラグを head SHA スコープにする振る舞いテスト (#2658)",
+    "target_issue_2667_issue_implementer_test_plan_format: issue-implementer が Test plan にチェックボックス形式でない箇条書きを生成する問題の回帰テスト (#2667)",
+    "target_issue_2669_red_first_split_commit: issue-implementer が RED-first の分割コミットを作らず PR 作成が require-red-first にブロックされる問題の回帰テスト (#2669)",
+    "target_require_subagent_prompt_contract: issue-implementer/issue-fixer 呼び出し時のプロンプト契約を機械検証する hook の契約テスト (#2724)",
+    "target_issue_2750: issue-fixer の step5-fix-end 手順が git push より後に記述されていることを検証する契約テスト (#2750)",
+    "target_fix_2785: テストが実リポジトリの .venv を uv sync で書き換えるバグの回帰テスト (#2785)",
+    "target_proofread_skill: Markdown 文章推敲 skill の SKILL.md が仕様通りに定義されているかを検証する契約テスト (#2775)",
+    "target_stamp_merge_summary_session: stamp-merge-summary-session.py hook の契約テスト (#2752)",
+    "target_issue_progress_label: issue_progress_label（in-progress ラベル付与・除去・判定）のテスト (#2804)",
+    "target_issue_2804: Issue着手時にGitHubラベルで多重着手を機械的に防止する振る舞いテスト (#2804)",
+    "target_pytest_flock: pytest フルスイートの同時実行をロックで直列化する振る舞いテスト (#2787)",
+    "target_pytest_workers: pytest ワーカー数をメモリ量に応じて決定する振る舞いテスト (#2784)",
+    "target_fix_2791: --dry-run が受理されるだけで副作用を抑止しないサブコマンドをなくす回帰テスト (#2791)",
+    "target_issue_2791: --dry-run による副作用抑止の振る舞いテスト (#2791)",
+    "target_fix_2815: test_issue_2787.py が CircleCI で ConnectionResetError になる問題の回帰テスト (#2815)",
+    "target_fix_2835: 入れ子 pytest がフルスイートロックを取りにいく自己デッドロックの回帰テスト (#2835)",
+    "target_issue_2835: 入れ子 pytest ではフルスイートロックを取得しない振る舞いテスト (#2835)",
+    "target_require_quality_check: require-quality-check hook テスト（Issue 品質チェック証跡の機械強制・#2770）",
+    "target_fix_2836: テストが実リポジトリへ pre-flight マーカーを書く汚染の回帰テスト (#2836)",
+    "target_issue_2836: pre_flight.run_cli を呼ぶテストのマーカー汚染防止の振る舞いテスト (#2836)",
+    "target_fix_2817: バッチ全体で in-progress ラベルが 1 件だけ移動することの回帰テスト (#2817)",
+    "target_issue_2817: consume 時に in-progress ラベルを次の Issue へ移動させる振る舞いテスト (#2817)",
+    "target_fix_2819: バッチ継続中に liveness 判定が stale へ落ちないことの回帰テスト (#2819)",
+    "target_issue_2819: liveness_at が古くても last_active が新しければ孤立判定しない振る舞いテスト (#2819)",
+    "target_fix_2831: workspace メンバーの dist-info を実 venv 比較から除外する回帰テスト (#2831)",
+    "target_issue_2831: .venv 初期化直後の初回 pre-flight が GREEN になる振る舞いテスト (#2831)",
+    "target_fix_2834: pytest 一時ディレクトリの配置と掃除ガードの回帰テスト (#2834)",
+    "target_issue_2834: pytest 一時ディレクトリが uv キャッシュと同一 FS に置かれる振る舞いテスト (#2834)",
+    "target_memguard: memguard.py hook の契約テスト（WSL2 メモリ枯渇事前検知・#2780）",
+    "target_fix_2797: pytest 内 os.environ 直接ミューテートによる ISSUE_NEXT_STATE_ROOT xdist worker 間漏洩の回帰テスト (#2797)",
+    "target_fix_2800: pre-flight/ai-review のマーカー hit 時にマーカーの出自（書き込み元・時刻）を記録する回帰テスト (#2800)",
+    "target_issue_2800: マーカー hit 時にマーカーの出自を記録する振る舞いテスト (#2800)",
+    "target_issue_2841: GAS jest.config.js の coverageReporters 設定で coverage/ ディレクトリ生成を止める振る舞いテスト (#2841)",
+    "target_issue_2858: ruff/mypy/gherkin-lint を tidd_tools 以外の Python project にも適用する振る舞いテスト (#2858)",
+    "target_backend_model_config: agy/codex デフォルトモデル名の config.json 上書きの単体テスト (#2861)",
+    "target_issue_2861: config.json のモデル名上書きが codex CLI 呼び出しへ反映される振る舞いテスト (#2861)",
+    "target_fix_2861: run_agy_review が config.json のモデル上書きを実際の agy 起動引数に反映しないバグの回帰テスト (#2861)",
+    "target_issue_2876: CircleCIコンテナのgit identity事前設定の振る舞いテスト (#2876)",
+    "target_issue_2874: issue-next-state next-unattended の実行中増分検知の振る舞いテスト (#2874)",
+    "target_issue_2875: health-check が PATH 上の tidd シャドーイング（正規グローバル install より手前の野良 tidd）を検知する振る舞いテスト (#2875)",
+    "target_fix_2894: nightly run-project-tests --all の pytest サブプロセスがハードコード 600 秒タイムアウトで異常終了する問題の回帰テスト (#2894)",
+    "target_block_direct_yaru_tick: block-direct-yaru-tick.py hook 契約テスト（Issue body 直接編集による [AI確認-post-merge] tick 検知・#2912）",
+    "target_fix_2923: mutmut-weekly job のコメントが実ステップ名を前方引用し gh CLI 前後関係チェックを誤検出させるバグの回帰テスト (#2923)",
+    "target_mutmut_timeout_config: [tool.mutmut] timeout_multiplier が CI メモリ安全な値に上書きされていることのテスト (#2939)",
+    "target_issue_2969: slow marker による E2E テストの実行分離の振る舞いテスト (#2969)",
+    "target_fix_2946: ai-review main() が STATE_DIR を resolve_state_dir 経由で解決せず他 PR のキャッシュを汚染するバグの回帰テスト (#2946)",
+    "target_shell_parse: _lib/shell_parse.py heredoc パース共通ユーティリティの単体テスト (#2951)",
+    "target_yaru_sections: _lib/yaru_sections.py やることセクション解析・issue body 取得共通ユーティリティの単体テスト (#2953)",
+    "target_gh_command: _lib/gh_command.py gh pr create検出・PR body抽出・closes/refs抽出共通ユーティリティの単体テスト (#2952)",
+    "target_fix_2981: test_fix_2791.py の screenshot-attach テストがモックなし cmd.exe 起動に依存し UnicodeDecodeError で失敗する回帰テスト (#2981)",
+    "target_mutmut_test_selection_config: [tool.mutmut] pytest_add_cli_args_test_selection が slow マーカーを除外する CI 安全な値に上書きされていることのテスト (#2983)",
+    "target_ai_review_consensus_escalation: consensus_verdict() エスカレーション3連コピー抽出（_escalate_consensus/is_backstop_exceeded共有化）のテスト (#2948)",
+    "target_tdd_check: tidd tdd-check サブコマンドの単体テスト（branch prefix skip・override marker bypass・gh/git 失敗時の境界値・#2895）",
+    "target_issue_2895: tidd tdd-check による TDD 順序疑いの機械判定の振る舞いテスト (#2895)",
+    "target_fix_2895_tdd_check_fetch_refspec: tidd tdd-check の git fetch が destination なしの refspec を使い remote.origin.fetch 設定次第で origin/<branch> tracking ref が更新されない回帰テスト (PR #3006 codex レビュー指摘)",
+    "target_git_helpers: _lib/git_helpers.py run_git/git_toplevel 共通ヘルパーの単体テスト (#2958)",
+    "target_fix_3840_consumer_compatibility: consumer 配布物互換性の回帰テスト (#3840)",
+    "target_fix_3845_screenshot_tool_compat: screenshot-rules.md/overview.md/AGENTS.md の Claude Code(Read)/Codex(view_image) 互換手順の回帰テスト (#3845)",
+    "target_target_dir: _lib/target_dir.py find_target_dir/get_timeout_sec 共通ヘルパーの単体テスト (#2958)",
+    "target_gherkin_check: _lib/gherkin_check.py Then/And継続行抽出・禁止語検査共通ユーティリティの単体テスト (#2956)",
+    "target_issue_2918: 直前と同一tree hashで成功済みのpre-flightは再実行されない振る舞いテスト (#2918)",
+    "target_pre_flight_repeat_guard: pre-flight 直近レコード読み取り・スキップ判定ロジックの単体テスト (#2918)",
+    "target_timing_log: 共通タイミング記録モジュール（attempt_id付き統一イベントログ）のテスト (#2933)",
+    "target_timing_log_repo_column: events テーブルの repo カラム（owner/repo 解決・read_all_events 露出）の単体テスト (#3588)",
+    "target_timing_log_record_event_safe: record_event_safe（fail-open ラッパー）の単体テスト (#2934)",
+    "target_ai_review_timing_dual_write: save_timing の統一イベントログ二重書き込みテスト (#2934)",
+    "target_issue_next_timing_dual_write: issue-next-timing mark CLI の統一イベントログ二重書き込みテスト (#2934)",
+    "target_merge_summary_unified_log: merge-summary 統一イベントログ読み側純関数のテーブル駆動テスト (#2935)",
+    "target_issue_2935: issue-2935.feature の step_defs テスト (#2935)",
+    "target_issue_2837: escape hatch 環境変数のテスト境界での隔離の振る舞いテスト (#2837)",
+    "target_issue_2808: BW_SESSION を keyctl で保持する振る舞いテスト (#2808)",
+    "target_issue_2950: detect_duplicates_batch.py / embedding_prefilter.py のキャッシュパスを shared/paths.cache_dir() へ統一する振る舞いテスト (#2950)",
+    "target_conflict_gate: ai-review マージコンフリクト gate（check_conflict_state）の単体テスト (#2989)",
+    "target_parser_critical: ai-review parser critical PR 判定（is_parser_critical / check_parser_critical_gate）の単体テスト (#3630)",
+    "target_issue_2989: issue-2989.feature の step_defs テスト (#2989)",
+    "target_issue_1464: feat/fix PR で .feature ファイル生成を必須化する振る舞いテスト (#1464・#3065)",
+    "target_issue_1598: continue-with-verdict の _classify() が [AI確認-post-merge] を分類する振る舞いテスト (#1598・#3065)",
+    "target_issue_1638: screenshot-attach の OS 別対応の振る舞いテスト (#1638・#3065)",
+    "target_issue_1689: review_prompt_loader が PyYAML を必須依存として YAML をロードする振る舞いテスト (#1689・#3065)",
+    "target_issue_1717: not-planned 集計の state 衝突解消と週次内訳の振る舞いテスト (#1717・#3065)",
+    "target_issue_1788: tidd xfail-status Total skeletons カウント正確性の振る舞いテスト (#1788・#3065)",
+    "target_issue_1648: review-prompt.yaml の schema 検証・render_common_header の振る舞いテスト (#1648・#3065)",
+    "target_issue_1671: CLI help golden テストの端末幅非依存化の振る舞いテスト (#1671・#3065)",
+    "target_issue_1747: main-RED 復旧（ruff format・extract-feature skeleton・sandbox_copier --overwrite）の振る舞いテスト (#1747・#3065)",
+    "target_issue_1751: handle_escalation の verdict センチネル書き込みによる自律ループ無限ループ解消の振る舞いテスト (#1751・#3065)",
+    "target_issue_1784: copier.yml notification_email の bare-metal.md 反映の振る舞いテスト (#1784・#3065)",
+    "target_issue_1847: extract-feature 生成 .feature のインデント正規化の振る舞いテスト (#1847・#3065)",
+    "target_npm_notice_filter: npm notice informational メッセージを除いた stderr 判定ロジックのテスト (#3790)",
+    "target_issue_3832: review-prompt.yaml の敵対的検証 CoT・反例提示義務化の振る舞いテスト (#3832)",
+    "target_issue_4065: attempt_cycle_rules の除外条件追加・敵対的検証優先明記の振る舞いテスト (#4065)",
+    "target_issue_1473: pytest-bdd undefined step 検知と Gherkin schema check の振る舞いテスト (#1473・#3065)",
+    "target_issue_1503: review-prompt.yaml の verdict rules 適用の振る舞いテスト (#1503・#3065)",
+    "target_issue_1755: reviewdog inline comment review 実行の振る舞いテスト (#1755・#3065)",
+    "target_issue_1759: approve flow の PR merge・GH_TOKEN 注入の振る舞いテスト (#1759・#3065)",
+    "target_llm_client: OpenAI 互換 chat/completions API を呼び出す汎用 HTTP client の単体テスト (#3116)",
+    "target_issue_3116: ai-review custom backend（OpenAI 互換 API）の振る舞いテスト (#3116)",
+    "target_propose_step: propose-step サブコマンド（TDDステップ単位のコード提案委譲）のテスト (#3118)",
+    "target_propose_step_config: propose_step.py の config 読み込み関数（リポジトリオーバーライド）の単体テスト (#3569)",
+    "target_issue_3118: propose-step サブコマンドの振る舞いテスト (#3118)",
+    "target_backend_chain_config: ai-review-chain（フォールバックチェーン順序）の config.json 解決の単体テスト (#3117)",
+    "target_issue_3117: ai-review フォールバックチェーン順序が config.json で変更可能な振る舞いテスト (#3117)",
+    "target_issue_3131: 実装委譲の config on/off 切り替え（impl-delegation gate）の振る舞いテスト (#3131)",
+    "target_issue_3133: propose-step --apply 機械適用モード（autoapply）の振る舞いテスト (#3133)",
+    "target_warn_diff_size: warn-diff-size.py hook 契約テスト（500/1000行閾値警告・state dedup・fail-open）(#3085)",
+    "target_issue_3086: issue-reviewer subagent への規模見積もり観点追加の振る舞いテスト (#3086)",
+    "target_issue_3142: audit-ci の fast-uri 脆弱性（GHSA-7p8r-x3mc-p8w7）修正の振る舞いテスト (#3142)",
+    "target_fix_3166: nightly-tests が node_modules/.bin/audit-ci 不在で失敗していた問題の回帰テスト (#3166)",
+    "target_issue_3152: propose-step 呼び出しログ（calls.jsonl）記録の振る舞いテスト (#3152)",
+    "target_issue_2982: screenshot-attach の WSL 自動検出が cp932 非 UTF-8 出力で crash しない振る舞いテスト (#2982)",
+    "target_fix_3179: pre-flight テストが実行環境の config.json（impl-delegation）に依存して失敗する問題の回帰テスト (#3179)",
+    "target_fix_3175: pre-flight 系テストの config.json 環境独立性（#3179 で対処済みの 2 件以外の run_cli 呼び出し含む）を包括検証する回帰テスト (#3175)",
+    "target_issue_3274: CircleCI nightly mypy (strict) ステップの cd 階層回帰テスト (#3274)",
+    "target_fix_3190: copier テンプレートの require-merge-ci-status hook 同期回帰テスト (#3190)",
+    "target_fix_3298: settings.json の環境変数ダンプ系 deny パターン回帰テスト (#3298)",
+    "target_fix_3300: テンプレート hooks の shebang 実行権限回帰テスト (#3300)",
+    "target_fix_3210: copier テンプレートの Codex 対応（AGENTS.md・.codex・.agents symlink）回帰テスト (#3210)",
+    "target_fix_3219: hook イベント名マップ導出の回帰テスト (#3219)",
+    "target_fix_3334: templates/workflow/AGENTS.md.jinja のルール乖離回帰テスト (#3334)",
+    "target_worktree_add: tidd worktree-add サブコマンドのテスト (#3296)",
+    "target_fix_3295: 旧 timing 参照元の統一イベントログ移行回帰テスト (#3295)",
+    "target_fix_3057: mutmut-weekly の timeout SIGINT配信で子プロセスのpytest後片付け競合が発生する問題の回帰テスト (#3057)",
+    "target_issue_3124: claude_() のYOLOモードflagファイル自動クリーンアップの振る舞いテスト (#3124)",
+    "target_issue_3196: rulesync による hooks 設定の Claude Code/Codex 両対応生成の振る舞いテスト (#3196)",
+    "target_issue_3223: codexcli では PostToolUse フックを登録しない振る舞いテスト (#3223)",
+    "target_ai_review_timing_steps_dual_write: append_step_timing の統一イベントログ二重書き込みテスト (#3126)",
+    "target_ensure_agents_skills: tidd ensure-agents-skills サブコマンドのテスト (#3197)",
+    "target_commands_to_skills: .claude/commands 2 本の skills 形式への変換テスト (#3200)",
+    "target_fix_3317: label_pr_slo/watch_circleci_failures 経由の GH_TOKEN os.environ 直書きのテスト間漏れ防止回帰テスト (#3317)",
+    "target_fix_3181: post_comment/post_primary_review_comment/continue_with_verdict の GH_TOKEN 非対話フォールバック回帰テスト (#3181)",
+    "target_issue_3327: Codex 読み取り専用 agent の sandbox_mode を permission profile へ置き換える振る舞いテスト (#3327)",
+    "target_fix_3327: readonly-safe permission profile の構造（:read-only 継承・deny 集合一致）回帰テスト (#3327)",
+    "target_fix_3330: post_merge_verifier の Codex 側権限（readonly-safe・書き込み deny）回帰テスト (#3330)",
+    "target_fix_3336: _check_agents_skills_symlink の未初期化 WARN・向き先誤り検出回帰テスト (#3336)",
+    "target_fix_3337: rulesync 未インストール時のドリフト検知（health-check WARN・pre-flight gate）回帰テスト (#3337)",
+    "target_sandbox_copier_rulesync_distribution: AGENTS.md・.codex/・.rulesync/・rulesync.jsonc の配布登録（REQUIRED_FILES / EXCLUDED_FILES）回帰テスト (#3354)",
+    "target_health_check_flat_skills: .claude/skills/ 直下のフラットな .md 検知回帰テスト (#3339)",
+    "target_codex_timing_boundary: Codex 環境の record-timing-boundaries PreToolUse 代替経路回帰テスト (#3329)",
+    "target_issue_3338: health-check の .claude/ ↔ .codex/ 構造パリティ検証の振る舞いテスト (#3338)",
+    "target_health_check_codex_parity: _check_codex_parity 系（hook 本数・agent 名・sandbox_mode）の単体テスト (#3338)",
+    "target_deconsumerize_codex_agents: deconsumerize_tidd_commands.py の .codex/agents/*.toml 置換テスト (#3983)",
+    "target_fix_3386: 所要時間サマリの異常表記（終了<開始・AIレビュー計測欠落）の表示回帰テスト (#3386)",
+    "target_issue_3386: merge-summary report の異常表記・stderr 警告の振る舞いテスト (#3386)",
+    "target_issue_3384: `tidd issue-next-state init` の attempt 境界記録の振る舞いテスト (#3384)",
+    "target_fix_3384: `tidd issue-next-state init` の attempt 分離回帰テスト (#3384)",
+    "target_fix_3389: 所要時間サマリ表の行順・日付表示回帰テスト (#3389)",
+    "target_issue_3389: merge-summary report の行順・日付表示・主担当列の振る舞いテスト (#3389)",
+    "target_issue_3398: sweep-merged-branches の振る舞いテスト (#3398)",
+    "target_sweep_merged_branches_hook: sweep-merged-branches PostToolUse hook の契約テスト (#3398)",
+    "target_issue_3432: merge-summary report の quiet デフォルト出力と --full 表出力の振る舞いテスト (#3432)",
+    "target_issue_3387: auto-merge 後のサマリ投稿失敗の loop-error 記録の振る舞いテスト (#3387)",
+    "target_fix_3387: サマリ投稿失敗の loop-error 記録・marker 管理統一の回帰テスト (#3387)",
+    "target_fix_3401: template 版 bypass_audit.py の platformdirs パス同期の回帰テスト (#3401)",
+    "target_require_closes_in_pr_body: require-closes-in-pr-body hook 契約テスト (#3420)",
+    "target_issue_3427: run-project-tests の npm ci / jest 出力 capture 化の振る舞いテスト (#3427)",
+    "target_issue_3427_run_project_tests: npm ci 失敗時の tail 行数・verbose escape hatch の境界値テスト (#3427)",
+    "target_issue_next_lock: issue-next の分散ロック（issue_next_lock）内部ユニットテスト (#3452)",
+    "target_issue_3452: issue-next の複数マシン同時実行時における同一Issue二重着手防止（分散ロック）の振る舞いテスト (#3452)",
+    "target_issue_4059: worktree-add のロック証跡検証によるレースの機械的な防止の振る舞いテスト (#4059)",
+    "target_issue_3428: ai-review プロジェクトテスト実行出力 capture 化の振る舞いテスト (#3428)",
+    "target_issue_3428_core_project_tests: verbose escape hatch・no-op 条件の境界値テスト (#3428)",
+    "target_issue_3429: ai-review の逐次進捗ログ verbose gate 化の振る舞いテスト (#3429)",
+    "target_issue_3429_verbose_gate: AI_REVIEW_VERBOSE gate ヘルパー _vprint と転記集計 1 行化の境界値テスト (#3429)",
+    "target_health_check_agents_md_size: AGENTS.md の Codex 32KiB 上限ガード（_check_agents_md_size）の単体テスト (#3406)",
+    "target_health_check_agents_md_jinja_size: consumer 配布 AGENTS.md.jinja の生成後サイズ上限ガード（_check_agents_md_jinja_size）の単体テスト (#3565)",
+    "target_health_check_managed_settings: settings.managed.json.jinja の MANAGED 部分（permissions.deny・hooks）乖離検証（_check_managed_settings_drift）の単体テスト (#3566)",
+    "target_fix_3565: templates/workflow/AGENTS.md.jinja の生成後サイズが Codex 32KiB 上限未満であることの回帰テスト (#3565)",
+    "target_fix_3770_agents_md_routing: 本体 AGENTS.md が detail rule 9 本のインライン展開を含まず overview + ルーティング中心であることの回帰テスト (#3770)",
+    "target_fix_3809_verify_full_e2e_agents_md: --full-e2e の上流ルール反映検証（_verify_upstream_rule_propagation）が detail rule マーカーの AGENTS.md 混入を誤って要求しないことの回帰テスト (#3809)",
+    "target_issue_3481: health-check の _resolve_main_worktree_root が PATH に git が無い環境で FileNotFoundError クラッシュしない振る舞いテスト (#3481)",
+    "target_fix_3485: nightly run-project-tests の _minimal_env が CI 未伝播で health-check を誤検知させる回帰テスト (#3485)",
+    "target_release: tidd release サブコマンド（CalVer タグ発行・GitHub Release 作成）のテスト (#3416)",
+    "target_sync_template: tidd sync-template（root -> templates 一方通行同期）のテスト (#3417)",
+    "target_issue_3417: root .claude/** の templates/workflow/.claude/** への一方通行同期の振る舞いテスト (#3417)",
+    "target_pre_flight_sync_template: pre-flight の sync-template drift チェック配線の単体テスト (#3417)",
+    "target_issue_3412: set-reviewer skill の copier 配布条件が use_ai_review に紐付く振る舞いテスト (#3412)",
+    "target_block_background_ai_review: ai-review のバックグラウンド実行（run_in_background / nohup / 末尾 `&`）をブロックする hook の契約テスト (#3421)",
+    "target_block_unattended_escalation: unattended モード中の AskUserQuestion をブロックする hook の契約テスト (#3633)",
+    "target_require_target_marker: require-target-marker hook 契約テスト（新規 pytest ファイルの @pytest.mark.target_ 欠落検知）(#3423)",
+    "target_issue_3516: 所要時間サマリの計測 mark 自己記録・GitHub API フォールバックの振る舞いテスト (#3516)",
+    "target_timing_log_record_event_once_safe: record_event_once_safe（冪等記録ラッパー）の単体テスト (#3516)",
+    "target_issue_3685_quality_check_sqlite: mark-quality-check-done の SQLite 永続化（WAL checkpoint）契約テスト (#3685)",
+    "target_ai_review_step5_step6_boundary: ai-review step5/step6 境界の自己記録ヘルパー単体テスト (#3516)",
+    "target_record_timing_boundaries_hook: record-timing-boundaries.py hook の stdin JSON パイプ契約テスト (#3516)",
+    "target_timing_mark_instructions: 機械記録済み step の手打ち mark 指示不在を検証する静的テスト (#3554)",
+    "target_require_no_xfail_stepdefs: require-no-xfail-stepdefs hook 契約テスト（gh pr create 時の step_defs xfail 残存検知）(#3425)",
+    "target_feat_3441_npm_audit_signatures: npm audit signatures によるレジストリ署名検証 CI（npm-audit-signatures-check ジョブ・gherkin-quality.md 限界記載）の回帰テスト (#3441)",
+    "target_feat_3440_osv_scanner: OSV-Scanner による package-lock.json 照合 CI（osv-scanner-check ジョブ・.osv-scanner.toml 受容設定）の回帰テスト (#3440)",
+    "target_issue_ref: _lib/issue_ref.py の issue-<N> 抽出共通ユーティリティのテスト (#3550)",
+    "target_branch_ref: shared/branch_ref.py のブランチ名解析・Issue キー抽出共通ユーティリティのテスト (#3550)",
+    "target_shared_issue_body_fix_singular: shared/issue_body.py CLOSES_RE の fix 単数形サポートのテスト (#3550)",
+    "target_issue_3550: Issue 番号・ブランチ・closes 参照解析の共通ユーティリティ集約の振る舞いテスト (#3550)",
+    "target_issue_3583: find_summary_comment_id のリポジトリ名解決失敗時の stderr 無出力の振る舞いテスト (#3583)",
+    "target_fix_3589_hook_io_exclude: hook_io.py を ban-hardcoded-repo の除外対象に加える回帰テスト (#3589)",
+    "target_issue_3604: .claude/templates/.rulesync 変更時に配布物検証テストを slow 込みで選択実行する振る舞いテスト (#3604)",
+    "target_dist_check_test_paths_guard: DIST_CHECK_TEST_PATHS の保守漏れ検知ガードテスト (#3604)",
+    "target_fix_3604_dist_check_mixed_change: DIST_CHECK_PROJECT_DIR 自体も同時に変更された mixed PR で配布物検証テストがスキップされる回帰テスト (#3604・PR #3607 レビュー指摘)",
+    "target_init_repo_config: copier post-copy task init_repo_config.py（.tidd/config.json safety-only 自動初期化）のテスト (#3591)",
+    "target_generate_rulesync_agents: copier post-copy task generate_rulesync_agents.py の stdlib フォールバック（AGENTS.md 生成・#3738）のテスト",
+    "target_fix_3620_pr_step_timing_key_prefix: append_step_timing の統一ログ書き込みキーを pr-<N> 形式に修正する回帰テスト (#3620)",
+    "target_memory_triage: tidd memory-triage サブコマンド（project 型削除候補検知）のテスト (#3659)",
+    "target_session_start_memory_warn: session-start-memory-warn.py hook の契約テスト (#3659)",
+    "target_session_start_verify_post_merge: session-start-verify-post-merge.py hook の契約テスト (#1965)",
+    "target_fix_3687_hook_io_wal_checkpoint: hook_io.append_timing_event が WAL checkpoint 未実行で timing.db にイベントを永続化できない回帰テスト (#3687)",
+    "target_issue_3696: worktree での custom backend キー解決・キー欠如時即時エラー・pre-flight の backend 解決不能時 skip の振る舞いテスト (#3696)",
+    "target_issue_3698_mypy_pep758: ruff 0.16 の PEP 758 フォーマットと mypy の非対応を整合させるバージョン方針テスト (#3698)",
+    "target_session_start_claude_local_md_warn_hook: session-start-claude-local-md-warn.py hook の契約テスト (#3700)",
+    "target_fix_3704_merge_summary_patch_raw_field: merge-summary の _patch_pr_comment が gh api -F body=@- で stdin を渡す回帰テスト (#3704)",
+    "target_issue_3741_screenshot_rules: templates/workflow への screenshot-rules 配布登録（REQUIRED_FILES / overview.md.jinja 参照行）回帰テスト (#3741)",
+    "target_fix_3743_gh_pr_diff_too_large: gh pr diff が20000行API上限を超えると ai-review が exit 3 を QUOTA_EXCEEDED に誤帰属する回帰テスト (#3743)",
+    "target_issue_3748: pre-flight hook lint timing step の正規語彙・fail-open 振る舞いテスト (#3748)",
+    "target_test_feat_1435: test_feat_1435.py 自身の選択実行用マーカー（#3785 で gh 一本化方針の regression guard へ改訂）",
+    "target_stamp_issue_next_session: stamp-issue-next-session.py hook の契約テスト (#3779)",
+    "target_hook_command_cwd_independence: 配布 hook コマンドの cwd 非依存形式統一・3ファイル間一致検証テスト (#3765)",
+    "target_issue_3765: 配布 hook コマンドの cwd 非依存化の振る舞いテスト (#3765)",
+    "target_fix_3844: label-pr.py の実プロセス起動テストが HOME/XDG_CACHE_HOME を override せず実行マシンの実キャッシュを汚染する回帰テスト (#3844)",
+    "target_fix_3876: merge-summary/approve-flow系テストの LOOP_ERROR_LOG_DIR 隔離漏れ横展開解消の回帰テスト (#3876)",
+    "target_fix_3877_windows_pytest_mypy_compat: Windows ネイティブの pytest xdist worker crash（tests/regressions/ パス判定の POSIX 前提バグ）と mypy --strict fcntl/signal attr-defined エラーの回帰テスト (#3877)",
+    "target_fix_3867: analyze-loop-errors の dedup key が PR番号違いで分裂しない回帰テスト (#3867)",
+    "target_issue_3867: analyze-loop-errorsが実インシデントのみを正確に集約起票する振る舞いテスト (#3867)",
+    "target_fix_3878_hook_io_timing_lock_retry: hook_io.append_timing_event/has_timing_event が一時的な sqlite3 ロック競合で timing.db への記録を失わない回帰テスト (#3878)",
+    "target_fix_3888_health_check_windows_path: _check_required_files/_is_excluded がバックスラッシュ区切り相対パスでも REQUIRED_FILES と正しく照合できる回帰テスト (#3888)",
+    "target_issue_3900: health-check の rulesync 解決が Windows で .cmd を優先解決する振る舞いテスト (#3900)",
+    "target_venv_python: _lib/venv_python.py find_venv_executable/find_venv_python 共通ヘルパーの単体テスト (#3896)",
+    "target_fix_3892_lazy_import: httpx/rich/jwt の遅延 import で CLI 起動コストを下げる回帰テスト (#3892)",
+    "target_fix_3889_hook_python3_fallback: hook 起動コマンドの python3 決め打ちで Windows の全ガードレールが no-op になる問題の回帰テスト (#3889)",
+    "target_fix_3893_windows_stub_pathext: tests/stub_helpers.write_stub が Windows で .cmd ラッパーを生成し PATHEXT 解決される回帰テスト (#3893)",
+    "target_fix_3936_venv_bin_path_paren: win_compat_scan の venv_bin_hardcode 正規表現が Path() コンストラクタを挟む venv/bin 決め打ちを検出できない不具合の回帰テスト (#3936)",
+    "target_issue_3937: copier 配布テンプレートに gherkin-lint pre-commit hook と .gherkin-lintrc が含まれる振る舞いテスト (#3937)",
+    "target_statusline_command: statusline-command.py の進行中 Issue 進捗表示の振る舞いテスト (#3939)",
+    "target_record_timing_boundaries_impl_boundaries_hook: record-timing-boundaries.py の実装フェーズ細粒度境界（git commit 分類・pytest 起動検知）の契約テスト (#3940)",
+    "target_merge_summary_impl_phase_fine_grained_steps: 実装フェーズ内の新規細粒度 step が「実装」行の所要時間算出に影響しないことの回帰テスト (#3940)",
+    "target_fix_3958_collect_lost_hooks_nested_schema: collect_lost_hooks が Claude Code の 2 段ネスト hooks schema を認識する回帰テスト (#3958)",
+    "target_fix_3956_settings_json_conflict_markers: copier update が .claude/settings.json に競合マーカーを残したまま exit 0 で終了する不具合の回帰テスト (#3956)",
+    "target_copier_update_settings_validation: tidd copier-update の settings.json post-update validation の振る舞いテスト (#3956)",
+    "target_fix_3967: permissions.deny がシェル経由（bash -c / sh -c / sudo bash）で迂回できる問題の回帰テスト (#3967)",
+    "target_issue_3968: consumer 専用 hook（notify-copier-staleness.py）が CODEX_PARITY を誤検知しない振る舞いテスト (#3968)",
+    "target_issue_3966: CLAUDE.md の @ import 先ファイルの実在を health-check で検証する振る舞いテスト (#3966)",
+    "target_fix_3978_npx_skip: test_issue_3937.py の npx 不在時 fail-loud を pytest.skip に修正する回帰テスト (#3978)",
+    "target_issue_3979: tidd_tools を consumer へ vendor 配布し実行時のリモート依存をなくす振る舞いテスト (#3979)",
+    "target_issue_3983: consumerize_tidd_commands を廃止し vendor 前提の記述へ戻す振る舞いテスト (#3983)",
+    "target_fix_3979_vendor_docs_sync_drift_skip: vendor 配布済み consumer で docs-sync drift チェックが誤爆しない回帰テスト（PR #3985 レビュー指摘）",
+    "target_fix_3986_mutmut_baseline_silent_fail: test_fix_3866 の Path(__file__).resolve().parents[N] が mutmut baseline stats フェーズを壊す回帰テスト (#3986)",
+    "target_issue_3984: uvx リモート解決機構を撤去し vendor 経路へ一本化する振る舞いテスト (#3984)",
+    "target_fix_3982_check_template_drift_consumer: consumer 文脈で check-template-drift/sync-template が RuntimeError で落ちない回帰テスト (#3982)",
+    "target_issue_3982: consumer 文脈で maintainer 専用サブコマンドが安全に no-op する振る舞いテスト (#3982)",
+    "target_block_subagent_size_marker: subagent による allow-large-pr / allow-xxl マーカー自己付与をブロックする hook の契約テスト (#3992)",
+    "target_issue_3993: size_over_1000_possible の分割検討フロー機械強制（require-split-consideration hook）の振る舞いテスト (#3993)",
+    "target_issue_next_timing_size_flag: issue-next-timing mark-quality-check-done の --size-over-1000-possible フラグ記録テスト (#3993)",
+    "target_issue_3995: park 後に再開してマージすると issue-next-state clear がデッドロックする不具合の振る舞いテスト (#3995)",
+    "target_fix_3998_require_mypy_vendor_no_tests: require-mypy.py が vendor 配布された tidd_tools project（tests/ 非同梱）で mypy src tests 実行により恒久ブロックしうる不具合の回帰テスト (#3998)",
+    "target_fix_4007_venv_repair_vendor_project_root: venv_repair._find_project_root が vendor 配布 consumer のルートから pyproject.toml を上方向探索して見つけられず FATAL になる不具合の回帰テスト (#4007)",
+    "target_docs_reference_check: 配布物内 docs パス参照の baseline 照合ロジック（docs_reference_check）のテスト (#4039)",
+    "target_issue_4039: templates/workflow/ 配下の未配布 docs パス参照の機械検出の振る舞いテスト (#4039)",
+    "target_pre_flight_docs_reference_check: pre-flight の配布物 docs パス参照チェック配線の単体テスト (#4039)",
+    "target_stamp_schedule_wakeup: stamp-schedule-wakeup.py hook の契約テスト (#4050)",
+    "target_fix_4084_coderabbit_untrusted_input: coderabbit-postmerge-screening の非信頼入力をシェル引数へ直挿ししない回帰テスト (#4084)",
+    "target_fix_4079_volta_shim_codex: propose-step の codex backend が Volta シム経由で exit 126 になる問題の回帰テスト (#4079)",
+    "target_fix_4123_mise_toml_custom_llm_placeholder: .mise.toml.example.jinja に custom backend の CUSTOM_LLM_API_KEY プレースホルダが追加されていることの回帰テスト (#4123)",
+    "target_fix_4136_clasp_skip: test_issue_4102.py の clasp 不在時 fail-loud を pytest.skip に修正する回帰テスト (#4136)",
+    "target_tmp_capacity: 一時領域の容量・inode 診断と repo-local TMPDIR フォールバック選択のテスト (#4143)",
+    "target_tmp_cleanup: stale な一時 artifact のみを安全に掃除して容量を回復するテスト (#4144)",
+    "target_tmp_retry: 一時領域不足を実装失敗と区別し bounded retry で skip-and-later-reselect を判定するテスト (#4149)",
+    "target_fix_4157_merge_summary_ci_merge_order: merge-summary の CI・マージ行が子フェーズより前に表示される順序逆転の回帰テスト (#4157)",
+    "target_fix_4171_doc_only_single_source: doc-only 判定が pre_flight._DOC_ONLY_RE とテンプレート exclude で食い違わないことの回帰テスト (#4171)",
+    "target_issue_4157: merge-summary report の CI・マージ行順序の振る舞いテスト (#4157)",
+    "target_issue_4170: pre-commit から呼べる pytest 実行サブコマンド（tidd pre-commit-pytest）の振る舞いテスト (#4170)",
+    "target_issue_4169_decisions_only_direct_push_docs: 決定記録のみの変更は PR を作らず直接 push できることの配布ドキュメント記述テスト (#4169)",
+    "target_issue_4167: pre-commit 設定の default_stages 宣言により commit-msg ステージで hook が二重実行されないことの振る舞いテスト (#4167)",
+    "target_issue_4181: 起動元別の issue-next 実装委譲先・モデルとレビュー設定の独立性テスト (#4181)",
+    "target_issue_4191: 非実装 subagent routing の role registry データ定義とアクセサの振る舞いテスト (#4191)",
+    "target_issue_4206: next-unattended がテキストのみの blocked-by 記法を選定除外に使う振る舞いテスト (#4206)",
+    "target_issue_4224: extract_text_blocked_by_numbers が複数行のテキスト blocked-by を全件抽出することの回帰テスト (#4224)",
+    "target_issue_4205: precommit_pytest.py が Windows ネイティブで PytestFlockContext のロック取得をスキップすることの振る舞いテスト (#4205)",
+    "target_issue_4187: 配布 pre-commit の pytest hook を Python プロジェクト関連変更のみに限定する振る舞いテスト (#4187)",
+    "target_issue_4190: role registry の独立性（実装委譲・レビュー backend 設定からの分離）テスト (#4190)",
+    "target_require_ai_reviewer_worktree_path: ai-reviewer subagent 起動 prompt に worktree 絶対パスの明示を機械強制する hook の契約テスト (#4218)",
+    "slow: 実 copier/uv sync/mypy 起動・2 秒超の E2E テスト（pre-flight/ai-review では除外・nightly で実行）",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+# Issue #4201: platform を明示的に固定しないと、mypy はデフォルトで実行ホストの
+# sys.platform をターゲットにするため、win32 限定分岐（ctypes.windll 等）の
+# `# type: ignore[attr-defined]` の要否が mypy を実行する OS（Linux/WSL か
+# Windows 実機ネイティブか）によって変わってしまう（Linux/WSL では必要・
+# Windows 実機ネイティブでは unused-ignore エラーになる）。プロジェクトの CI・
+# 開発機は Linux/WSL を前提とするため linux に固定し、判定結果をホスト OS に
+# 依存させない。
+platform = "linux"
+# Issue #3698: native parser を有効化し PEP 758（except A, B:・Python 3.14）を受理する。
+# mypy の default parser は実行中 Python の文法に追従するため、Python < 3.14 runtime では
+# `--python-version 3.14` でも PEP 758 を [syntax] として拒否する。ruff 0.16 の py314
+# target が生成する PEP 758 形式と整合させるため native parser を明示する
+# （mypy 2.1+ で利用可・将来デフォルト化予定）。
+native_parser = true
+# Issue #3727: pre-flight の mypy は `mypy src tests`（CI の consumer `uv run mypy src tests` と
+# 同一）で tests/ も検査する。本家（tidd_tools 自身）は CI（.circleci）が `mypy src/` のみを
+# 検査し tests/ の型注釈債務が未解消（2057 件超）のため、ここで tests/ 配下の型エラーを
+# 抑制して pre-flight を GREEN に保つ。consumer は copier 雛形の pyproject.toml（本
+# overrides 無し）で配布されるため tests/ も strict 検査され、型注釈欠落が CI 前に検知される。
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+# platformdirs は型スタブを提供していない（PEP 561 未対応）。
+# 実行時に import 可能であれば十分なため、mypy 上は型情報欠如を無視する。
+[[tool.mypy.overrides]]
+module = "platformdirs"
+ignore_missing_imports = true
+
+# PyYAML: types-PyYAML スタブが別パッケージ。dev 依存に追加せずに
+# mypy の [import-untyped] エラーを抑制する。
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true
+
+# numpy: 新バージョンの型スタブが PEP 695 type 文（Python 3.12+）を使用するため、
+# python_version = "3.11" 環境では syntax error になる（Issue #1859）。
+# numpy は tidd_tools の実行依存ではなく embedding_prefilter の optional 依存経由で
+# 間接的に参照される。ignore_missing_imports は「未インストール時」のみ有効で、
+# CI（uv sync --all-extras）のように numpy インストール済みの環境では同梱スタブを
+# follow して syntax error になるため、follow_imports = "skip" で解析自体を止める。
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# model2vec / sentence_transformers: optional 依存のため型スタブが存在しない。
+# インストール有無で import-not-found / import-untyped のどちらが発生するか異なるため
+# ignore_missing_imports で統一的に抑制し、インストール済み環境（CI --all-extras）で
+# パッケージ本体を follow しないよう follow_imports = "skip" を併用する（Issue #1859）。
+[[tool.mypy.overrides]]
+module = ["model2vec", "model2vec.*", "sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "C901"]
+ignore = ["E402"]
+
+# Issue #3080: 循環的複雑度チェック（mccabe C901）。閾値 15・既存違反は noqa baseline
+# 方式で免除し、新規コードのみ即エラー化する（drain は #3079）。
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# テストは日本語 docstring や長い fixture データが含まれやすく E501 を厳格に
+# 適用すると保守コストが高い。src/ は line-length=120 で厳格に運用する。
+# N802: step_defs は pytest-bdd の Scenario 名を日本語で test 関数名に使うため小文字制約を除外する。
+"tests/**/*.py" = ["E501", "N802"]
+# ai-review プロンプト本文は旧 ai-review.sh の cat <<PROMPT を 1:1 で踏襲するため、
+# 日本語文字列リテラルが長くなる。改行を入れるとプロンプトの意味が変わるリスクが
+# 高いため、プロンプト定義モジュールに限定して E501 を除外する。
+"src/tidd_tools/ai_review/prompts.py" = ["E501"]
+
+# Formatter (ruff format) 設定。ADR: docs/decisions/012-ruff-format-adopted.md
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = false
+
+# Issue #1286: mutmut mutation testing 設定
+# mutmut 3.x は pyproject.toml の [tool.mutmut] を自動読み込みする。
+# CircleCI で `uv run mutmut run` を呼ぶだけで下記対象モジュールに mutation が適用される。
+# 初期 6 か月は observation のみ（KPI 化は #1300 で対応）。
+[tool.mutmut]
+# mutmut 3.x で `paths_to_mutate` → `source_paths`、`tests_dir` (str) →
+# `pytest_add_cli_args_test_selection` (list) にリネームされた（Issue #1374）。
+#
+# source_paths にパッケージ全体を渡すことで mutants/ ディレクトリに shared/ 等の
+# 依存モジュールもコピーされ、テストの `from tidd_tools.shared import ...` が通る。
+# mutation 対象は `only_mutate` の glob で critical モジュール（ai_review・
+# test_plan・issue_quality_check）に限定する（fnmatch なので `*` は `/` にもマッチする）。
+#
+# Issue #1439: pytest_add_cli_args_test_selection を critical モジュール直下の test に絞る。
+# 過去 Issue #1379 の `["tests"]` 全走行設定は「parents[N] エラー混入を見逃さないため」
+# だったが、以下により当該妥協理由は消滅した:
+#   - PR #1424・#1433 で残存 parents[N] を掃討
+#   - `.claude/hooks/ban-parents-n.py` で新規追加を PreToolUse hook で機械強制ブロック
+#   - `.circleci/detect_baseline_silent_fail.py`（PR #1437）で万一の baseline abort を明示化
+#
+# 全走行に戻すと、E2E / sandbox_copier 等の critical モジュールと無関係な test の失敗で
+# baseline check が abort し mutation testing loop に到達できない構造的問題が再発する
+# （Issue #1419 → PR #1424 → 再発 → PR #1433 → 再発 の 3 回連続露呈）。
+# critical モジュールの mutation 検出という mutmut 本来の目的に手段を一致させる。
+source_paths = ["src/tidd_tools/"]
+only_mutate = [
+    "src/tidd_tools/ai_review/*",
+    "src/tidd_tools/test_plan.py",
+    "src/tidd_tools/issue_quality_check.py",
+]
+# pytest の positional (`tests/`) で collection、`-k` filter で critical モジュール直下の
+# test に絞る。keyword は test node ID（path + test name）に対する部分一致で評価される:
+#   - "ai_review": tests/test_ai_review_*.py にマッチ
+#   - "test_plan": tests/test_test_plan.py にマッチ
+#   - "issue_quality_check": tests/test_issue_quality_check*.py にマッチ
+#   - "regressions": tests/regressions/ 配下（path に含まれる）にマッチ
+# これで tests/ 直下の E2E / sandbox_copier / gh cache 等の無関係 test は baseline
+# check から除外されるが、"regressions" は tests/regressions/ 配下を丸ごとマッチ
+# させるため、同ディレクトリ内の実 copier copy / uv sync / mypy 起動を伴う
+# pytest.mark.slow E2E テスト（Issue #2969）は依然として含まれる。この残存分は
+# 下記 `-m "not slow"`（Issue #2983）で除外する。
+pytest_add_cli_args_test_selection = [
+    "tests/",
+    "-k",
+    "ai_review or test_plan or issue_quality_check or regressions",
+    "-m",
+    "not slow",
+]
+# Issue #2939: mutmut は mutant を estimated_worst_case_time（その mutant を
+# カバーする test の実行時間合計）昇順にソートして実行するため
+# （mutmut/__main__.py `mutants = sorted(mutants, key=lambda x:
+# estimated_worst_case_time(x[1]))`）、実行コストの高い mutant は必ず run の
+# 末尾に集まる。1 mutant あたりの wall time 上限は
+# `(estimated_time_of_tests + timeout_constant) * timeout_multiplier` で決まり、
+# ライブラリ既定値 timeout_multiplier=15.0 はカバー test 数の多い critical
+# モジュール（ai_review 等）の mutant に対し 1 mutant あたり 10 分を超える
+# タイムアウト猶予を与えてしまう。resource_class を medium(4GB)→large(8GB) に
+# 倍増した #2920 の修正後も pipeline #108（Issue #2939）で 14519/14535
+# （99.9%）まで進行した状態で全く同じ "Received "killed" signal" が再発し、
+# resource_class を増やすだけでは解決しないことが判明した（末尾に集中する
+# 低速 mutant 群が --max-children 2 で並行実行される間に蓄積するメモリ・
+# 実行時間がコンテナのメモリ上限を超えていると推定される）。
+# timeout_multiplier を引き下げて 1 mutant あたりの wall time 上限を数分
+# オーダーに抑え、末尾の低速 mutant 群を早期に timeout させることで job
+# 全体が完走前に OOM kill される事態を防ぐ。
+timeout_multiplier = 5.0
+# Issue #2983: timeout_multiplier=5.0 化（#2939）後も pipeline #109 で
+# 全く同じ 14519/14535（99.9%）付近で "Received "killed" signal" が
+# 再発した。mutmut/__main__.py を追跡すると、pytest_add_cli_args_test_selection
+# は stats 収集フェーズ（`run_stats_collection` → `runner.run_stats(tests=[])`）
+# でのみ使われ、そこで見つかった test だけが以後の mutation loop で各 mutant の
+# 「カバーする test」として再実行される仕様と判明した。従来の `-k` 条件は
+# tests/regressions/ 配下の pytest.mark.slow（Issue #2969: 実 copier copy /
+# uv sync / mypy 起動を伴う E2E テスト）にもマッチしていた。mutant 実行が
+# register_timeout() の wall time 超過で SIGXCPU を送られ強制終了される際、
+# その mutant テスト worker が slow テスト内部でブロッキング subprocess
+# （uv sync / copier copy / mypy）呼び出し中だと、Unix の仕様上 forked
+# worker を kill してもその子プロセスは自動終了せず孤児化してバックグラウンド
+# で動き続ける。mutant 実行が進むほどこれが蓄積し、estimated_worst_case_time
+# 昇順ソートで低速 test に紐づく mutant が集まる run 末尾で OOM kill を
+# 招くと推定される（resource_class 倍増・timeout_multiplier 引き下げの
+# いずれも孤児プロセス蓄積そのものは解消しないため、両修正後も同一箇所で
+# 再発したことと整合する）。上記 pytest_add_cli_args_test_selection に
+# `-m "not slow"` を追加し、これら重い E2E テストを stats 収集対象から
+# 除外することで孤児プロセス蓄積の発生源を断つ。
+
+[tool.coverage.run]
+source = ["src/tidd_tools"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Issue #1287: coverage 段階引き上げ計画（#2587 で 65 に中間引き上げ）
+#   - 2026-07 スタート: fail_under = 55（当時実測 60% の直下・regression 検知用マージン）
+#   - 2026-07 中間引き上げ (#2587): fail_under = 65（実測 70.7% の約 5pt 下）
+#   - 半年後 (2027-01): fail_under = 70
+#   - 1 年後 (2027-07): fail_under = 85
+# CircleCI の pytest 実行で --cov --cov-report=xml を付与し、
+# 閾値未達で job を fail させる。coverage.xml は analyze-performance が集計する。
+fail_under = 65

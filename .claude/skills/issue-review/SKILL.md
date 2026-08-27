@@ -3,7 +3,7 @@ name: issue-review
 description: GitHub Issue の品質を意味的に評価する（Pain の深さ・Gherkin の検証可能性）。Anthropic API 直接呼び出しは廃止し、Claude Code の Agent tool で issue-reviewer subagent を起動する（Issue #1301 で全廃）。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # /issue-review
 
@@ -74,7 +74,7 @@ gh issue comment <N> --body-file <一時ファイル>  # 本文: "## Issue品質
 - **PASS の場合（size_over_1000_possible が true）:** PASS コメントに加えて、**非ブロッキングの分割提案**を追記する:
 
 ```bash
-gh issue comment <N> --body-file <一時ファイル>  # 本文: "## Issue品質チェック結果\n\n✅ このIssueは実装可能な状態です。\n\n`/issue-next` で着手してください（`🙋 needs-human-input` がなければ自動選定されます）。\n\n---\n\n### 規模の目安（非ブロッキング）\n\n実装規模が 1000 行を超える可能性があります（<size_reason>）。\n`docs/reference/pr-splitting-guide.md` を参照し、PR を分割できないか検討してください。\n着手はブロックされません。分割するかどうかは実装者の判断に委ねます。"
+gh issue comment <N> --body-file <一時ファイル>  # 本文: "## Issue品質チェック結果\n\n✅ このIssueは実装可能な状態です。\n\n`/issue-next` で着手してください（`🙋 needs-human-input` がなければ自動選定されます）。\n\n---\n\n### 規模の目安（非ブロッキング）\n\n実装規模が 1000 行を超える可能性があります（<size_reason>）。\nai-dev-handbook 本体の docs/reference/ 配下・`pr-splitting-guide.md`（consumer 未配布） を参照し、PR を分割できないか検討してください。\n着手はブロックされません。分割するかどうかは実装者の判断に委ねます。"
 ```
 
 - **FAIL の場合:** subagent が返した `pain_reason` / `gherkin_issues` / `boundary_reason` / `prose_only_reason` を列挙する。`size_over_1000_possible` は FAIL 理由に含めない:
@@ -99,5 +99,5 @@ Claude Code の Agent tool 経由で subagent を起動することで、Claude 
 - `.claude/agents/issue-reviewer.md` — subagent 定義
 - `.claude/rules/issue-creation.md` — 判定基準
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- docs/reference/issue-review-skill.md — 詳細ドキュメント
+- ai-dev-handbook 本体の docs/reference/ 配下・`issue-review-skill.md`（consumer 未配布） — 詳細ドキュメント
 - `tidd_tools.issue_quality_check` モジュール — 互換性スタブ（常に PASS）

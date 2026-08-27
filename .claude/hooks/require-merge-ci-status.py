@@ -52,7 +52,7 @@ from _lib.hook_io import (
 )
 from _lib.shell_parse import split_shell_fragments
 
-DETAIL = "詳細: docs/reference/hooks.md#require-merge-ci-statuspy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-merge-ci-statuspy`（consumer 未配布）\n"
 
 _MERGE_SEGMENT_RE = re.compile(r"^\s*gh\s+pr\s+merge(\s|$)")
 _GAS_PROJECT_RE = re.compile(r"^projects/gas/([^/\n]+)", re.MULTILINE)

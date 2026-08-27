@@ -3,7 +3,7 @@ name: verify-post-merge
 description: マージ済み PR の [AI確認-post-merge] 項目を post-merge-verifier subagent で自律検証し、成功項目を - [x] に更新・24h 超過の失敗項目は Issue 起票して追跡注記付きで消化する。cron 定期実行（引数なし）またはユーザーが「/verify-post-merge <PR番号>」で特定 PR を検証するときに使う。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # verify-post-merge
 
@@ -13,7 +13,7 @@ description: マージ済み PR の [AI確認-post-merge] 項目を post-merge-v
 
 **引数あり（`/verify-post-merge 42`）:** PR #42 の未消化 `[AI確認-post-merge]` を検証する。
 
-**引数なし:** cron routine（`tidd schedule` または Claude Code `CronCreate`）から起動される想定。
+**引数なし:** cron routine（`uv run --project projects/py/tidd_tools tidd schedule` または Claude Code `CronCreate`）から起動される想定。
 マージ後 24h 以内の PR を全件走査して各 PR で本 SKILL を再帰的に実行する。
 cron 設定手順は本ファイル末尾の「cron routine 設定」節を参照。
 
@@ -39,7 +39,7 @@ auto-merge 経路と異なりサマリが 1 件も残らないケースがある
 直近マージ PR でサマリ未投稿のものを補完する:
 
 ```bash
-tidd merge-summary sweep --days 1
+uv run --project projects/py/tidd_tools tidd merge-summary sweep --days 1
 ```
 
 既に投稿済みの PR は `find_summary_comment_id` 判定でスキップされるため二重投稿は起きない。
@@ -52,7 +52,7 @@ tidd merge-summary sweep --days 1
 **引数なし（cron 起動）:** 対象 PR を CLI で機械列挙する:
 
 ```bash
-tidd verify-post-merge --list-candidates
+uv run --project projects/py/tidd_tools tidd verify-post-merge --list-candidates
 ```
 
 このコマンドは closed PR のうち、以下の 3 条件をすべて満たす PR 番号を stdout に 1 行 1 件で出力する
@@ -68,7 +68,7 @@ tidd verify-post-merge --list-candidates
 ### STEP 2: 未消化 `[AI確認-post-merge]` 項目の抽出
 
 ```bash
-tidd verify-post-merge <PR番号>
+uv run --project projects/py/tidd_tools tidd verify-post-merge <PR番号>
 ```
 
 このコマンドは PR ボディから `- [ ] [AI確認-post-merge] <条件>` 行を抽出して stdout に
@@ -79,11 +79,20 @@ tidd verify-post-merge <PR番号>
 
 ### STEP 3: post-merge-verifier subagent で検証
 
+起動前に実行環境を `claude_code` / `codex` のどちらかとして判定し、共通 routing を解決する。
+コマンドが非ゼロなら stderr をそのまま表示して終了し、subagent を起動しない。成功時は JSON の
+`native_mechanism` で起動 tool を選び、`agent_type` と `model`（`null` は指定省略）を起動引数へそのまま渡す。
+
+```bash
+uv run --project projects/py/tidd_tools tidd resolve-subagent-routing --launcher <claude_code|codex> --role post-merge-verifier
+```
+
 Agent tool で `post-merge-verifier` subagent を起動する:
 
 ```
-Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="post_merge_verifier", task_name="post_merge_verifier", message=...) に読み替え
-  subagent_type="post-merge-verifier",
+Agent(  # routing.native_mechanism を使う。Codex では spawn_agent(task_name="post_merge_verifier", message=...)
+  subagent_type=<routing.agent_type>,
+  model=<routing.model>,  # null の場合は省略
   description="PR #<N> の [AI確認-post-merge] 検証",
   prompt="""PR #<N> のマージ後に、以下の [AI確認-post-merge] 項目を検証してください。
 
@@ -186,9 +195,9 @@ gh pr edit <PR番号> --body-file /tmp/pr-body-<PR番号>.md
 
 本 SKILL は cron 定期実行を前提とする。以下いずれかで起動する:
 
-### 方式 A: `tidd schedule`（推奨・chezmoi 管理）
+### 方式 A: `uv run --project projects/py/tidd_tools tidd schedule`（推奨・chezmoi 管理）
 
-`tidd schedule` で登録した job から `/verify-post-merge`（引数なし）を発火する。
+`uv run --project projects/py/tidd_tools tidd schedule` で登録した job から `/verify-post-merge`（引数なし）を発火する。
 schedule 定義は chezmoi でマシン間配布される。
 
 推奨頻度: **毎時実行**（マージ後 24h の window を細かく監視するため）:
@@ -215,7 +224,7 @@ CronCreate({
 ### routine 起動時の挙動
 
 - `/verify-post-merge`（引数なし）が起動される
-- 本 SKILL の STEP 0 で `tidd merge-summary sweep --days 1` を実行し、人間マージ経路で
+- 本 SKILL の STEP 0 で `uv run --project projects/py/tidd_tools tidd merge-summary sweep --days 1` を実行し、人間マージ経路で
   投稿が漏れた所要時間サマリを補完する（#3517）
 - 本 SKILL の STEP 1 で「マージ後 24h 以内 + 本文に `[AI確認-post-merge]` を含む PR」を列挙
 - 対象 PR ごとに STEP 2〜7 を実行
@@ -226,11 +235,11 @@ CronCreate({
 Issue #1402 の Phase 1（本 PR）では以下を提供する:
 
 - ✅ `[AI確認-post-merge]` タグの test-plan 通過（auto-merge を妨げない）
-- ✅ `tidd verify-post-merge <PR>` の CLI ラッパー
+- ✅ `uv run --project projects/py/tidd_tools tidd verify-post-merge <PR>` の CLI ラッパー
 - ✅ `.claude/skills/verify-post-merge/SKILL.md`（本ファイル）
 - ✅ `.claude/agents/post-merge-verifier.md`
 
-cron routine 実登録（`tidd schedule` エントリ or `CronCreate`）は Phase 2 で別 Issue として扱う。
+cron routine 実登録（`uv run --project projects/py/tidd_tools tidd schedule` エントリ or `CronCreate`）は Phase 2 で別 Issue として扱う。
 本 PR ではワークフローが手動起動（`/verify-post-merge <PR>`）で完結することを検証する。
 
 ## Anthropic SDK 直接呼び出し禁止
@@ -243,6 +252,6 @@ cron routine 実登録（`tidd schedule` エントリ or `CronCreate`）は Phas
 - `.claude/agents/post-merge-verifier.md` — subagent 定義
 - `tidd_tools.verify_post_merge` モジュール — CLI エントリポイント
 - `.claude/rules/workflow.md` — Test plan チェックリスト記述ルール（`[AI確認-post-merge]` タグ）
-- `docs/reference/post-merge-verify-workflow.md` — 詳細ドキュメント
+- ai-dev-handbook 本体の docs/reference/ 配下・`post-merge-verify-workflow.md`（consumer 未配布） — 詳細ドキュメント
 - `.claude/skills/issue-next/SKILL.md` — pre-merge `[AI確認]` 検証（対比参照）
 - Issue #1402 — 本 SKILL の設計 Issue

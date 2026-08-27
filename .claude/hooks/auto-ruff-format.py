@@ -81,7 +81,7 @@ def _main() -> int:
         print(
             "WARN: auto-ruff-format: .venv/bin/ruff が見つかりません。"
             " `uv sync --all-extras` を実行して workspace venv を作成してください。"
-            " docs/reference/hooks.md#auto-ruff-formatpy 参照",
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#auto-ruff-formatpy`（consumer 未配布） 参照",
             file=sys.stderr,
         )
         return 0
@@ -99,7 +99,7 @@ def _main() -> int:
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         print(
             f"WARN: auto-ruff-format: ruff の実行に失敗しました: {e}."
-            " docs/reference/hooks.md#auto-ruff-formatpy 参照",
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#auto-ruff-formatpy`（consumer 未配布） 参照",
             file=sys.stderr,
         )
         return 0
@@ -108,7 +108,7 @@ def _main() -> int:
         print(
             "WARN: auto-ruff-format: ruff format が失敗しました。"
             " auto-ruff-format hook が silent 失敗している可能性 →"
-            " docs/reference/hooks.md#auto-ruff-formatpy 参照\n"
+            " 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#auto-ruff-formatpy`（consumer 未配布） 参照\n"
             f"{result.stderr}",
             file=sys.stderr,
         )

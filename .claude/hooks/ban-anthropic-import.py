@@ -2,7 +2,7 @@
 """PreToolUse hook: Anthropic SDK の直接インポートを機械強制ブロックする.
 
 このリポジトリでは Anthropic API を Python から直接呼び出す実装は禁止されています。
-`docs/reference/claude-api.md` の方針に反する `import anthropic` / `from anthropic import` /
+上流リポジトリ本体の docs/reference/ 配下・`claude-api.md`（consumer 未配布）の方針に反する `import anthropic` / `from anthropic import` /
 動的 import / `pyproject.toml` / `requirements*.txt` の依存宣言を検出して exit 2 でブロックする。
 
 Issue #1281（hard rule・override マーカーなし）。
@@ -179,14 +179,16 @@ def _main() -> int:
             f"検出: {error}\n"
             f"対象: {file_path}\n"
             "代替: Claude Code のスキルやサブエージェント機能を使って実装してください。\n"
-            "詳細: `docs/reference/claude-api.md` / `docs/reference/hooks.md#ban-anthropic-importpy`\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`claude-api.md`・"
+            "`hooks.md#ban-anthropic-importpy`（consumer 未配布）\n"
         )
     else:
         sys.stderr.write(
             f"{error}\n"
             f"対象: {file_path}\n"
             "このリポジトリでは Anthropic API パッケージの直接依存宣言は禁止されています。\n"
-            "詳細: `docs/reference/claude-api.md` / `docs/reference/hooks.md#ban-anthropic-importpy`\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`claude-api.md`・"
+            "`hooks.md#ban-anthropic-importpy`（consumer 未配布）\n"
         )
     return 2
 

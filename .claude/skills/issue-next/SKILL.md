@@ -5,10 +5,9 @@ permissions:
   defaultMode: acceptEdits
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # issue-next
-
 `🙋 needs-human-input` ラベルのないオープンなIssueを priority 順・Issue番号順で選定し、
 TiDDワークフローに従って実装 → PR → AIレビュー → 自動マージまで一気通貫で処理する。
 マージ完了後は次のIssueを自動開始し、着手可能なIssueが尽きるまで自走する。
@@ -19,15 +18,14 @@ TiDDワークフローに従って実装 → PR → AIレビュー → 自動マ
 
 **`--unattended` フラグ（Issue #2245・#2802 で対象を拡大・#3633 で状態永続化）:** 夜間放置自走用の opt-in フラグ。引数なし・単一番号・バッチモードのいずれとも併用できる（`/issue-next --unattended` / `/issue-next 42 --unattended` / `/issue-next 42 43 44 --unattended`）。指定しない場合は本 SKILL 全体の挙動を一切変更しない（デフォルト動作）。あり時は STEP 1.5-d・STEP 2/5 の park 報告・STEP 5（ai-review exit 1 PR起因・exit 2・exit 4 手動確認待ち・CI 失敗）・STEP 6（MERGED 未確認）のエスカレーションで停止せず park-and-continue する。手順詳細: [`unattended-park-and-continue.md`](./unattended-park-and-continue.md)。
 
-**モードの永続化（#3633）:** `--unattended` 付きで開始するときは STEP 1 の `init` に必ず `--unattended` を渡す（`tidd issue-next-state init <N> --unattended`）。これにより `cache/issue-next-state/issue-<N>.json` に `"unattended": true` が書き込まれ、`consume` でキューを進めても保持される（バッチ 2 件目以降もモードが落ちない）。**各分岐点ではモードを記憶に頼らず、`tidd issue-next-state is-unattended <N>` の exit code で判定する**（exit 0 = unattended / exit 1 = attended・state 不在）。以降の「**`is-unattended <N>` が exit 0 のとき:**」はこのコマンドを指す。また unattended モード中の `AskUserQuestion` は `block-unattended-escalation.py` PreToolUse hook が exit 2 でブロックする（unattended state が TTL 内に残っている間・escape hatch: `SKIP_UNATTENDED_ESCALATION_GATE=1`・詳細: `docs/reference/hooks.md`）。
+**モードの永続化（#3633）:** `--unattended` 付きで開始するときは STEP 1 の `init` に必ず `--unattended` を渡す（`uv run --project projects/py/tidd_tools tidd issue-next-state init <N> --unattended`）。これにより `cache/issue-next-state/issue-<N>.json` に `"unattended": true` が書き込まれ、`consume` でキューを進めても保持される（バッチ 2 件目以降もモードが落ちない）。**各分岐点ではモードを記憶に頼らず、`uv run --project projects/py/tidd_tools tidd issue-next-state is-unattended <N>` の exit code で判定する**（exit 0 = unattended / exit 1 = attended・state 不在）。以降の「**`is-unattended <N>` が exit 0 のとき:**」はこのコマンドを指す。また unattended モード中の `AskUserQuestion` は `block-unattended-escalation.py` PreToolUse hook が exit 2 でブロックする（unattended state が TTL 内に残っている間・escape hatch: `SKIP_UNATTENDED_ESCALATION_GATE=1`・詳細: ai-dev-handbook 本体の docs/reference/ 配下・`hooks.md`（consumer 未配布））。
 
-**`/issue-next-all`（Issue #2802・#2874・#2903）:** `tidd issue-next-state next-unattended` CLI で `🙋 needs-human-input`・`🔧 in-progress` ラベルなしの Open Issue から priority→番号順で次の1件を選定し、Skill tool 経由で本 SKILL の単一番号モードへ `--unattended` 付きで委譲する別 skill。1 件完了ごとに選定をやり直すため実行中に新規起票された Issue も次回選定に反映される。深夜放置など無停止自走が前提。詳細: `.claude/skills/issue-next-all/SKILL.md`。
+**`/issue-next-all`（Issue #2802・#2874・#2903）:** `uv run --project projects/py/tidd_tools tidd issue-next-state next-unattended` CLI で `🙋 needs-human-input`・`🔧 in-progress` ラベルなしの Open Issue から priority→番号順で次の1件を選定し、Skill tool 経由で本 SKILL の単一番号モードへ `--unattended` 付きで委譲する別 skill。1 件完了ごとに選定をやり直すため実行中に新規起票された Issue も次回選定に反映される。深夜放置など無停止自走が前提。詳細: `.claude/skills/issue-next-all/SKILL.md`。
 
-**Codex で本 SKILL 自体を `spawn_agent` で直接起動する場合（Issue #3436）:** 呼び出し元は `task_name="issue_next"` を指定すること。STEP 5・STEP 6 で本 SKILL 自身が実行する `tidd ai-review` / `gh pr merge` は `block-subagent-review-merge.py` の許可リストにより通過する（issue-implementer / issue-fixer への委譲はブロック対象のまま）。詳細: `.claude/skills/issue-next/subagent-delegation.md`「Codex: wait_agent タイムアウト時の注意」。
+**Codex で本 SKILL 自体を `spawn_agent` で直接起動する場合（Issue #3436）:** 呼び出し元は `task_name="issue_next"` を指定すること。STEP 5・STEP 6 で本 SKILL 自身が実行する `uv run --project projects/py/tidd_tools tidd ai-review` / `gh pr merge` は `block-subagent-review-merge.py` の許可リストにより通過する（issue-implementer / issue-fixer への委譲はブロック対象のまま）。詳細: `.claude/skills/issue-next/subagent-delegation.md`「Codex: wait_agent タイムアウト時の注意」。
 
 ## GitHub 操作の指針（Issue #1435）
-
-**本 SKILL 内の GitHub 操作は `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。** 詳細な旧マッピング（撤回済み・参考用）は docs/reference/mcp-tool-migration.md 参照。
+**本 SKILL 内の GitHub 操作は `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。** 詳細な旧マッピング（撤回済み・参考用）は ai-dev-handbook 本体の docs/reference/ 配下・`mcp-tool-migration.md`（consumer 未配布） 参照。
 
 要点:
 - Issue 操作: `gh issue view` / `gh issue list` / `gh issue edit` / `gh issue comment` / `gh issue create`
@@ -38,7 +36,6 @@ TiDDワークフローに従って実装 → PR → AIレビュー → 自動マ
 ---
 
 ## 出力ルール（CRITICAL: Issue #674）
-
 メインセッションへの出力は**完了形のみ**で行う。内部推論テキストを出力に含めてはならない。
 
 **禁止:** 「〜と報告して終了します」「〜をスキップします」などの未来形・進行形・内部判断プロセスの説明。
@@ -47,50 +44,54 @@ TiDDワークフローに従って実装 → PR → AIレビュー → 自動マ
 
 ## STEP 1: 次のIssueを選定
 
+実行環境を `claude_code` / `codex` のどちらかとして判定し、共通 routing を解決する。
+コマンドが非ゼロなら stderr をそのまま表示して終了し、issue-next を起動しない。成功時は JSON の
+`native_mechanism` で起動 tool を選び、`agent_type` と `model`（`null` は指定省略）を起動引数へそのまま渡す。
+
+```bash
+uv run --project projects/py/tidd_tools tidd resolve-subagent-routing --launcher <claude_code|codex> --role issue-next
+```
 **着手対象 Issue 番号: $ARGUMENTS**
 
 ### バッチモード（複数番号指定）
-
 **CRITICAL: `🙋 needs-human-input` ラベルがついていても停止してはならない。無条件に着手する。** 複数番号指定はユーザーの明示的承認とみなす。停止条件は「並行PR上限（5件）」「競合」のみ。
 
 1. 最初の番号を今回の着手対象として取り出し、残りの番号を「未処理キュー」として記憶する。この最初の番号を「バッチ anchor 番号」として、以降このバッチ内で行う `issue-next-state` 呼び出しすべてに明示する（**#2474: state ファイルは Issue 番号ごとに分離されているため、anchor 番号を明示しないと複数ターミナル並行時に他ターミナルの state ファイルを誤って参照する恐れがある**。`consume` はキュー消費後も同じファイル内で `current_issue` を更新するだけでファイル名は anchor 番号のまま変わらない）。**`init` の前に anchor 番号の `🔧 in-progress` ラベル有無を確認する（多重着手防止・Issue #2804）。** 手順・exit 1 時のエスカレーション文言は [`in-progress-label-check.md`](./in-progress-label-check.md) を読んで実行する
 2. exit 0 の場合のみ状態を JSON ファイルに永続化する（STEP 1.5 より先に実行）:
    ```bash
-   tidd issue-next-state migrate
-   tidd issue-next-state init 42 43 44
+   uv run --project projects/py/tidd_tools tidd issue-next-state migrate
+   uv run --project projects/py/tidd_tools tidd issue-next-state init 42 43 44
    # cache/issue-next-state/issue-42.json: { "current_issue": 42, "queue": [43, 44], ... }
    # `--unattended` で開始する場合は init に --unattended を付けて永続化する（#3633）:
-   #   tidd issue-next-state init 42 43 44 --unattended
+   #   uv run --project projects/py/tidd_tools tidd issue-next-state init 42 43 44 --unattended
    ```
 3. Issue リスト取得（`gh issue list`）は実行しない。STEP 1.5 へ進む
 4. マージ完了後は未処理キューの先頭を消費して次の着手対象とする（anchor 番号 42 を明示）:
    ```bash
-   next=$(tidd issue-next-state consume 42)
+   next=$(uv run --project projects/py/tidd_tools tidd issue-next-state consume 42)
    ```
 5. キューが空 → 「バッチ処理完了」報告 → `issue-next-state clear 42` で状態ファイル削除
 6. エスカレーション・CI失敗 → 即座に停止し残りキュー番号を報告（状態ファイルはそのまま残す）
 
 ### バッチ中断からの再開
-
 ```bash
-tidd issue-next-state current   # current_issue を表示（候補ファイルが1つだけなら自動解決。複数あれば ls cache/issue-next-state/ で対象ファイルを確認し [issue] を明示する）
-tidd issue-next-state queue     # 残キュー（空白区切り）を表示
+uv run --project projects/py/tidd_tools tidd issue-next-state current   # current_issue を表示（候補ファイルが1つだけなら自動解決。複数あれば ls cache/issue-next-state/ で対象ファイルを確認し [issue] を明示する）
+uv run --project projects/py/tidd_tools tidd issue-next-state queue     # 残キュー（空白区切り）を表示
 # 残りの番号を指定して再開: /issue-next <current> <queue...>
 ```
 
 ### 単一番号指定
-
 **CRITICAL: `🙋 needs-human-input` ラベルがついていても停止してはならない。無条件に着手する。** 単一番号指定はユーザーの明示的承認とみなす。Issue リスト取得は実行しない。STEP 1.5 へ進む。
 
 **CRITICAL: マージ完了・後処理（worktree 削除・ブランチ削除・main sync）が完了するまで turn を終了してはならない。** state を更新しながら STEP を進める（`require-issue-next-completion.py` Stop hook が in-progress state を検出して継続を強制する。Issue #2321）。**CRITICAL: issue-next 実行中は一般規約「明示的に求められない限りコミットしない」より継続契約が優先される（#3724）。** 実装・テスト・pre-flight 完了後はコミット許可が明示されなくてもコミット → push → PR作成まで進める（`require-issue-next-completion.py` が PR 未作成時の stop を exit 2 でブロック・#3846）。人間判断が必要な場合（`🙋 needs-human-input` = park）のみ停止し、単なるコミット・push・PR作成未実施を人間待ちとして扱わない。**`init` の前に `🔧 in-progress` ラベルの有無を確認する（多重着手防止・Issue #2804）。** 手順・exit 1 時のエスカレーション文言は [`in-progress-label-check.md`](./in-progress-label-check.md) を読んで実行する。exit 0 の場合のみ以下を実行する:
 
 ```bash
-tidd issue-next-state migrate
-tidd issue-next-state init <Issue番号>
+uv run --project projects/py/tidd_tools tidd issue-next-state migrate
+uv run --project projects/py/tidd_tools tidd issue-next-state init <Issue番号>
 # cache/issue-next-state/issue-<Issue番号>.json: { "current_issue": <Issue番号>, "queue": [], ... }
 ```
 
-完了時（STEP 6 のマージ・後処理完了後）に `tidd issue-next-state clear <Issue番号>` で状態ファイルを削除する（**#2474: `<Issue番号>` を明示することで他ターミナルの state ファイルを誤って削除しない**。`init`/`clear` に連動した `🔧 in-progress` ラベル付与・除去の仕様は [`in-progress-label-check.md`](./in-progress-label-check.md) 参照）。
+完了時（STEP 6 のマージ・後処理完了後）に `uv run --project projects/py/tidd_tools tidd issue-next-state clear <Issue番号>` で状態ファイルを削除する（**#2474: `<Issue番号>` を明示することで他ターミナルの state ファイルを誤って削除しない**。`init`/`clear` に連動した `🔧 in-progress` ラベル付与・除去の仕様は [`in-progress-label-check.md`](./in-progress-label-check.md) 参照）。
 
 ### 引数なし
 
@@ -99,8 +100,8 @@ tidd issue-next-state init <Issue番号>
 **事前チェック（引数なしモード専用・#3626）:** まず以下を順に実行する:
 
 ```bash
-tidd resume-candidates                # exit 0 + 候補あり → resume フロー実行
-tidd check-pr-conflicts --count-only  # exit 0=上限未満 / exit 2=上限（5件）→エスカレーション。step0-pr-limit-check は本コマンドが自己記録（#3557）
+uv run --project projects/py/tidd_tools tidd resume-candidates                # exit 0 + 候補あり → resume フロー実行
+uv run --project projects/py/tidd_tools tidd check-pr-conflicts --count-only  # exit 0=上限未満 / exit 2=上限（5件）→エスカレーション。step0-pr-limit-check は本コマンドが自己記録（#3557）
 ```
 
 詳細: [`resume-needs-human-merge.md`](./resume-needs-human-merge.md)（resume フロー）・exit 2: 既存PR 1件マージ（推奨）or 作業終了。
@@ -108,7 +109,7 @@ tidd check-pr-conflicts --count-only  # exit 0=上限未満 / exit 2=上限（5�
 **CRITICAL: 現在のブランチ名・git log・gitStatus から「作業済み」「完了済み」などと判断して停止してはならない。** 必ず CLI で次に着手すべき Issue を選定する。
 
 ```bash
-tidd issue-next-state next-unattended
+uv run --project projects/py/tidd_tools tidd issue-next-state next-unattended
 ```
 
 stdout が Issue 番号 1 件なら、それを今回の着手対象とする。選定ロジックは CLI 側に一元化されており
@@ -127,18 +128,18 @@ Issue の除外はすべて CLI が行う。stdout が空（着手可能な Issu
 `require-issue-next-completion.py`（PR 未作成のまま放置防止）が有効になる:
 
 ```bash
-tidd issue-next-state migrate
-tidd issue-next-state init --enforce-session-limit <N>
+uv run --project projects/py/tidd_tools tidd issue-next-state migrate
+uv run --project projects/py/tidd_tools tidd issue-next-state init --enforce-session-limit <N>
 # cache/issue-next-state/issue-<N>.json: { "current_issue": <N>, "queue": [], ... }
 ```
 
-完了時（STEP 6 のマージ・後処理完了後）に `tidd issue-next-state clear <N>` で状態ファイルを削除する（**#2474: `<N>` を明示することで他ターミナルの state ファイルを誤って削除しない**）。
+完了時（STEP 6 のマージ・後処理完了後）に `uv run --project projects/py/tidd_tools tidd issue-next-state clear <N>` で状態ファイルを削除する（**#2474: `<N>` を明示することで他ターミナルの state ファイルを誤って削除しない**）。
 
 ---
 
 ## STEP 1.5: Issue品質チェック・自動修正
 
-STEP 1 で着手対象 Issue が確定した直後に、**ラベル有無にかかわらず毎回**品質チェックを実行する。`step1-confirmed` は `tidd issue-next-state init <N>` が両キー（issue-next-session / issue-<N>）に自動記録する（#3154）。`step1.5-quality-check` は `issue-reviewer` subagent 起動時に record-timing-boundaries hook が自動記録する（#3557）。
+STEP 1 で着手対象 Issue が確定した直後に、**ラベル有無にかかわらず毎回**品質チェックを実行する。`step1-confirmed` は `uv run --project projects/py/tidd_tools tidd issue-next-state init <N>` が両キー（issue-next-session / issue-<N>）に自動記録する（#3154）。`step1.5-quality-check` は `issue-reviewer` subagent 起動時に record-timing-boundaries hook が自動記録する（#3557）。
 
 **パブリックリポジトリ:** `gh repo view --json isPrivate` の `isPrivate` フィールドで判定し、プライベートでない場合は自動修正を行わず `🙋 needs-human-input` 付与のみ行う。
 
@@ -202,11 +203,11 @@ subagent は `.claude/agents/issue-reviewer.md` の `output_format`（10 フィ�
 
 ### STEP 1.5-d: 意味チェック結果の対処
 
-**PASS:** `tidd issue-next-timing mark-quality-check-done <N> --verdict pass` で終了時刻を記録してから STEP 2 へ進む（#3158・require-quality-check.py の証跡）。
+**PASS:** `uv run --project projects/py/tidd_tools tidd issue-next-timing mark-quality-check-done <N> --verdict pass --size-over-1000-possible <true|false>`（issue-reviewer の JSON の `size_over_1000_possible` の値をそのまま渡す）で終了時刻を記録してから STEP 1.5-e へ進む（#3158・require-quality-check.py の証跡・#3993）。
 
-**CRITICAL（Issue #1561）: PASS コメント投稿は完了イベントではない。** PASS コメントを投稿した直後に turn を終了してはならない。同一 turn 内で必ず STEP 2 の `Agent(subagent_type="issue-implementer", ...)` 呼び出しを発火せよ。turn を切ると孤児セッションが発生する（Issue #1558 で実際に発生）。
+**CRITICAL（Issue #1561）: PASS コメント投稿は完了イベントではない。** PASS コメントを投稿した直後に turn を終了してはならない。同一 turn 内で必ず STEP 1.5-e（または `size_over_1000_possible: false` の場合は STEP 2）の `Agent(subagent_type="issue-implementer", ...)` 呼び出しまで発火せよ。turn を切ると孤児セッションが発生する（Issue #1558 で実際に発生）。
 
-**FAIL:** subagent の `pain_reason` / `gherkin_issues` を根拠に Issue 本文を自動修正し、`tidd issue-next-timing mark-quality-check-done <N> --verdict fail` で終了時刻を記録してから STEP 2 へ進む（#3158・require-quality-check.py の証跡）。
+**FAIL:** subagent の `pain_reason` / `gherkin_issues` を根拠に Issue 本文を自動修正し、`uv run --project projects/py/tidd_tools tidd issue-next-timing mark-quality-check-done <N> --verdict fail --size-over-1000-possible <true|false>` で終了時刻を記録してから STEP 1.5-e へ進む（#3158・require-quality-check.py の証跡・#3993）。
 
 **修正不能・判断不能な場合:** `🙋 needs-human-input` ラベルを付与して選択肢形式で報告する:
 
@@ -230,7 +231,7 @@ C. Issue #N をスキップして次の Issue に着手する — 今すぐ着�
 
 `step1.5-quality-check` の計測境界クローズは、`gh issue create --parent <親番号>` でサブ Issue を追加したときに
 record-timing-boundaries hook が自動記録する
-（機械強制・#3817。手動 `mark-quality-check-done` は不要）。
+（機械強制・#3817。手動 `mark-quality-check-done` は不要）。**STEP 1.5-e（規模警告時の分割検討・Issue #3993）:** `size_over_1000_possible: true` のときのみ実行（`false` なら STEP 2 へ直行）。`require-split-consideration.py` hook が根拠コメントなしの `issue-implementer` 起動を機械ブロックする。手順: [`split-consideration.md`](./split-consideration.md)。
 
 ---
 
@@ -244,9 +245,9 @@ record-timing-boundaries hook が自動記録する
 
 ## STEP 1.7: 既存 PR / 中断レビュー検知（Issue #1232）・競合 PR スキップ（#2154）
 
-`step1.7-conflict-check` は `tidd check-pr-conflicts --issue <N>` が自己記録する（#3557）。STEP 2 前に競合 PR チェックを実行する。着手対象の確定状況（`/issue-next` の引数有無）に応じて `--explicit-target` の有無を切り替える（#3634）:
-- **引数あり（単一番号・バッチモード）:** `tidd check-pr-conflicts --issue <N> --explicit-target`
-- **引数なし（自動ループ）:** `tidd check-pr-conflicts --issue <N>`
+`step1.7-conflict-check` は `uv run --project projects/py/tidd_tools tidd check-pr-conflicts --issue <N>` が自己記録する（#3557）。STEP 2 前に競合 PR チェックを実行する。着手対象の確定状況（`/issue-next` の引数有無）に応じて `--explicit-target` の有無を切り替える（#3634）:
+- **引数あり（単一番号・バッチモード）:** `uv run --project projects/py/tidd_tools tidd check-pr-conflicts --issue <N> --explicit-target`
+- **引数なし（自動ループ）:** `uv run --project projects/py/tidd_tools tidd check-pr-conflicts --issue <N>`
 
 | exit | 意味 | 対応 |
 |------|------|------|
@@ -258,7 +259,7 @@ record-timing-boundaries hook が自動記録する
 
 ## STEP 2: 実装（issue-implementer 委譲・Issue #2452）
 
-`step2-implementation` / `step2-branch-created` は `tidd worktree-add` が `git worktree add` の前後で自動記録するため、手動 mark は不要（#3518）。issue-implementer subagent に実装を委譲する。
+`step2-implementation` / `step2-branch-created` は `uv run --project projects/py/tidd_tools tidd worktree-add` が `git worktree add` の前後で自動記録するため、手動 mark は不要（#3518）。issue-implementer subagent に実装を委譲する。起動前に `uv run --project projects/py/tidd_tools tidd resolve-issue-next-agent` を実行し、出力された `agent_type` と `model` を使用する（Issue #4181）。
 
 **CRITICAL: prompt には Issue 番号のみを渡す。** Issue タイトル・本文・ラベルを prompt に埋め込まない（プロンプトインジェクション対策・`.claude/rules/tool-calling.md` 準拠）。subagent 自身が `gh issue view <N> --json number,title,body,labels,state` で本文を取得する。
 
@@ -274,17 +275,17 @@ Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_impleme
 
 issue-implementer は以下の順序で処理し、各フェーズ境界で timing mark を取る（#2453）:
 
-1. worktree 作成（`step2-branch-created` は `tidd worktree-add` が `git worktree add` 成功時に自動記録・#3518）
+1. worktree 作成（`step2-branch-created` は `uv run --project projects/py/tidd_tools tidd worktree-add` が `git worktree add` 成功時に自動記録・#3518）
 2. 環境初期化 → TDD（RED → 実装 → GREEN）（「実装」行の終了境界は最初の `step3-preflight-start` から導出・#3558）
 
-   **外部 backend へのステップ委譲（任意・#3118）:** config.json に `impl-delegation: true` かつ `impl-backend` が設定されている場合、RED / GREEN 各ステップで `tidd propose-step --phase {red,green} --issue <N>` を実行して提案を取得できる。提案は untrusted として Issue の Scenario と突き合わせて検証してから Write/Edit で適用する。`impl-delegation` 無効時（デフォルト）または `impl-backend` 未設定時は従来どおり issue-implementer 自身が実装する。詳細: `docs/reference/propose-step-guide.md`
+   **外部 backend へのステップ委譲（任意・#3118）:** config.json に `impl-delegation: true` かつ `impl-backend` が設定されている場合、RED / GREEN 各ステップで `uv run --project projects/py/tidd_tools tidd propose-step --phase {red,green} --issue <N>` を実行して提案を取得できる。提案は untrusted として Issue の Scenario と突き合わせて検証してから Write/Edit で適用する。`impl-delegation` 無効時（デフォルト）または `impl-backend` 未設定時は従来どおり issue-implementer 自身が実装する。詳細: ai-dev-handbook 本体の docs/reference/ 配下・`propose-step-guide.md`（consumer 未配布）
 3. 競合チェック
 4. `uv run --project projects/py/tidd_tools tidd pre-flight`（`step3-preflight-start` / `step3-preflight-end` は `pre_flight.py` が自動記録するため手動 mark 不要・#2741）
 5. `gh pr create --title <title> --body <body> --head <branch> --base main`（`step4-pr-created` は record-timing-boundaries hook が PR 作成成功時に自動記録・#3160）
 
-**手順 4（`tidd pre-flight`）が exit 1 の場合（Issue #2927）:** 通常の周回（RED→修正→GREEN）で解消しない場合、[`existing-test-failure.md`](./existing-test-failure.md) の突合判定（起点 B・PR 作成前ローカル実行）に従い `tidd classify-test-failure --issue <Issue番号>` を実行して exit code で分岐する。exit 0（既存問題・条件①②の 2 条件 AND 成立）の場合は **attended/unattended 問わず無条件**で同ファイルの自動修正フロー（ブロッカー用 fix Issue 自動起票 → issue-implementer 委譲で SKILL.md STEP 2〜STEP 6 を実行 → マージ → 元 Issue の worktree に復帰し `origin/main` を取り込んで `tidd pre-flight` を再実行）を実行する。exit 1/2（条件①②のいずれか不成立・または判定不能）の場合は既存問題と判定せず、`existing-test-failure.md`「PR/pre-flight 起因時のエスカレーション」の起点 B 手順（park・`needs-human-input` ラベル付与）に従う。
+**手順 4（`uv run --project projects/py/tidd_tools tidd pre-flight`）が exit 1 の場合（Issue #2927）:** 通常の周回（RED→修正→GREEN）で解消しない場合、[`existing-test-failure.md`](./existing-test-failure.md) の突合判定（起点 B・PR 作成前ローカル実行）に従い `uv run --project projects/py/tidd_tools tidd classify-test-failure --issue <Issue番号>` を実行して exit code で分岐する。exit 0（既存問題・条件①②の 2 条件 AND 成立）の場合は **attended/unattended 問わず無条件**で同ファイルの自動修正フロー（ブロッカー用 fix Issue 自動起票 → issue-implementer 委譲で SKILL.md STEP 2〜STEP 6 を実行 → マージ → 元 Issue の worktree に復帰し `origin/main` を取り込んで `uv run --project projects/py/tidd_tools tidd pre-flight` を再実行）を実行する。exit 1/2（条件①②のいずれか不成立・または判定不能）の場合は既存問題と判定せず、`existing-test-failure.md`「PR/pre-flight 起因時のエスカレーション」の起点 B 手順（park・`needs-human-input` ラベル付与）に従う。`diff-size`（1000 行超ゲート）park は [`subagent-delegation.md`](./subagent-delegation.md)「diff-size gate park の追加検証（Issue #3992）」の独立検証を先に実行する。**exit 3 の場合（一時領域不足の unattended bounded retry が再試行上限へ到達し回復不能・Issue #4149・#4150）は上記の突合判定に進まず `needs-human-input` も付与しない。** 詳細（stdout JSON 契約・attended 時との違い）は [`existing-test-failure.md`](./existing-test-failure.md)「起点 B」の exit 3 節を参照。
 
-issue-implementer は `PR: #<N>` / `branch: <name>` / `worktree: <path>`（正常終了）、`park: <理由>` / `issue: #<N>（needs-human-input 付与済み）`（park）、または `skip: <理由>` / `issue: #<N>`（ファイル競合検出・needs-human-input 付与なし）のいずれかの形式で最終応答する。
+issue-implementer は `PR: #<N>` / `branch: <name>` / `worktree: <path>`（正常終了）、`park: <理由>` / `issue: #<N>（needs-human-input 付与済み）`（park）、または `skip: <理由>` / `issue: #<N>`（ファイル競合検出・一時領域不足の再選定〔#4150〕・needs-human-input 付与なし）のいずれかの形式で最終応答する。
 
 **CRITICAL: subagent の完了報告を信用しない。** 機械検証・park/skip 処理は [`subagent-delegation.md`](./subagent-delegation.md) を読んで実行する。検証を満たしたら STEP 3 へ進む。
 
@@ -296,7 +297,7 @@ issue-implementer は `PR: #<N>` / `branch: <name>` / `worktree: <path>`（正�
 
 issue-implementer が作成した PR に対しラベル付与と Issue やること転記を行う。
 
-`label-pr` hook が PR 作成時に `type:` / `size/` ラベルを自動付与する。`tidd config` で `label-pr` を無効化している場合のみ手動で付与する（閾値は `.claude/hooks/label-pr.py` を参照）:
+`label-pr` hook が PR 作成時に `type:` / `size/` ラベルを自動付与する。`uv run --project projects/py/tidd_tools tidd config` で `label-pr` を無効化している場合のみ手動で付与する（閾値は `.claude/hooks/label-pr.py` を参照）:
 
 ```bash
 # update_pull_request は labels パラメータを受け付けないため gh api でラベル追加する
@@ -307,7 +308,7 @@ gh api -X POST /repos/{owner}/{repo}/issues/<PR番号>/labels --input - <<< '{"l
 Issue `## やること` の `[手動]`/`[AI確認]` 未 tick 項目を PR Test plan に自動転記する（第 1 段・Issue #2026）:
 
 ```bash
-tidd transfer-issue-items <PR番号>
+uv run --project projects/py/tidd_tools tidd transfer-issue-items <PR番号>
 # 失敗してもフローを止めない（best-effort）。exit code に関わらず STEP 5 へ進む
 ```
 
@@ -317,7 +318,7 @@ tidd transfer-issue-items <PR番号>
 
 ### 実行 CWD（CRITICAL: STEP 2 で報告された worktree から実行する・Issue #2452）
 
-`tidd ai-review` は **issue-implementer が STEP 2 で報告した worktree パスから実行する**（PoC で判明した要件・親調査 #2444）。存在しない場合は再作成する:
+`uv run --project projects/py/tidd_tools tidd ai-review` は **issue-implementer が STEP 2 で報告した worktree パスから実行する**（PoC で判明した要件・親調査 #2444）。存在しない場合は再作成する:
 
 ```bash
 cd <STEP 2 で報告された worktree パス> 2>/dev/null || {
@@ -329,7 +330,7 @@ cd <STEP 2 で報告された worktree パス> 2>/dev/null || {
 
 ### AI review 実行時のルール（CRITICAL: Issue #1232）
 
-`tidd ai-review` は **同期（前景）実行必須**。以下を **併用してはならない**:
+`uv run --project projects/py/tidd_tools tidd ai-review` は **同期（前景）実行必須**。以下を **併用してはならない**:
 - `run_in_background=true` での Bash ツール呼び出し
 - `nohup` / `setsid` / `disown` / `&` などのシェル背景化
 - `ScheduleWakeup` で数分後に結果を回収するパターン
@@ -338,7 +339,7 @@ cd <STEP 2 で報告された worktree パス> 2>/dev/null || {
 
 ```bash
 # 前景（同期）実行 — このセッション中に完了まで待つ
-tidd ai-review <PR番号> <試行回数>
+uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>
 ```
 
 Bash ツールの `run_in_background` パラメータは **省略** or `false`（デフォルト）。
@@ -348,15 +349,15 @@ Issue やること未消化ゲートの影響は「APPROVE 後の自動マージ
 
 ### parser critical PR 判定
 
-`tidd ai-review <PR番号> <試行回数>` を通常どおり実行し、**exit 6 が返ったら parser critical PR**（Issue #3630）。`tidd ai-review` 本体が PR の変更ファイルを取得して判定する（`tidd_tools/ai_review/` サブディレクトリ含む・`.claude/hooks/validate-issue.py` / `.claude/hooks/require-issue.py`）。変更ファイルを目視して判定する必要はない。
+`uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>` を通常どおり実行し、**exit 6 が返ったら parser critical PR**（Issue #3630）。`uv run --project projects/py/tidd_tools tidd ai-review` 本体が PR の変更ファイルを取得して判定する（`tidd_tools/ai_review/` サブディレクトリ含む・`.claude/hooks/validate-issue.py` / `.claude/hooks/require-issue.py`）。変更ファイルを目視して判定する必要はない。
 
-parser critical PR は `tidd ai-review --stop-before-merge` を使う。詳細は [`parser-critical-pr.md`](./parser-critical-pr.md) を読んで実行する。
-**タイミング計測（Issue #2644・#3516）:** `step5-airview-start` / `step5-airview-end` は `tidd ai-review` 本体（`core.py::main`・#3516）が backend レビュー実行前後に自己記録するため、手打ち mark は不要（#3553）。verdict の `started_at`/`ended_at` も本体が実測する。
+parser critical PR は `uv run --project projects/py/tidd_tools tidd ai-review --stop-before-merge` を使う。詳細は [`parser-critical-pr.md`](./parser-critical-pr.md) を読んで実行する。
+**タイミング計測（Issue #2644・#3516）:** `step5-airview-start` / `step5-airview-end` は `uv run --project projects/py/tidd_tools tidd ai-review` 本体（`core.py::main`・#3516）が backend レビュー実行前後に自己記録するため、手打ち mark は不要（#3553）。verdict の `started_at`/`ended_at` も本体が実測する。
 
 ### AIレビュー実行（非 parser critical PR）
 
 ```bash
-tidd ai-review <PR番号> <試行回数>
+uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>
 # 終了コード 0 → APPROVE 自動マージ完了
 # 終了コード 1 → REQUEST_CHANGES（下記「exit 1 / exit 5 の分岐ロジック」へ）
 # 終了コード 2 → エスカレーション（PRコメント・Slack通知済み。人間マージが必要）
@@ -391,7 +392,7 @@ PR ボディに `[AI確認]` 項目がある場合は [`ai-confirm-verification.
 | 1 | バックエンドが REQUEST_CHANGES を返した（レビュー指摘あり） | 「リトライループ」へ |
 | 5 | テスト status gate による中断（`pytest/*` / `jest/*` の commit status が FAILURE / ERROR・#1982） | 失敗テストのパスと現在の PR の変更ファイルを突合する |
 
-**既存問題判定（2 条件 AND・機械実行）:** `tidd classify-test-failure --pr <PR番号>` を実行し、**exit code で分岐する**（0 = 既存問題・1 = PR/対象 Issue 起因・2 = 判定不能。判定根拠は stdout の JSON 1 行）。条件①②の AND 判定・失敗ファイル抽出・origin/main 再現確認はコマンドが機械実行する。分岐詳細は [`existing-test-failure.md`](./existing-test-failure.md) の「突合判定」を参照。
+**既存問題判定（2 条件 AND・機械実行）:** `uv run --project projects/py/tidd_tools tidd classify-test-failure --pr <PR番号>` を実行し、**exit code で分岐する**（0 = 既存問題・1 = PR/対象 Issue 起因・2 = 判定不能。判定根拠は stdout の JSON 1 行）。条件①②の AND 判定・失敗ファイル抽出・origin/main 再現確認はコマンドが機械実行する。分岐詳細は [`existing-test-failure.md`](./existing-test-failure.md) の「突合判定」を参照。
 
 **exit 1 のうち `condition1` が `true` かつ `condition2` が `false` の場合のみ「環境依存フレーキーテスト」区分（条件②'・Issue #2094）に該当すれば既存問題として扱う。** 判定手順・自動修正フローの差分は [`existing-test-failure.md`](./existing-test-failure.md) の「条件②' 環境依存フレーキーテスト判定」を参照。
 
@@ -414,11 +415,11 @@ PR ボディに `[AI確認]` 項目がある場合は [`ai-confirm-verification.
 
    **Codex の入力契約チェック（#3491）:** `.codex/agents/issue_fixer.toml` の自己検証も issue-implementer 同様「message 全体の完全一致」ではなく「先頭行が `^PR番号:\s*\d+\s*$` に一致するか」に緩和済み（Claude Code 側 `.claude/agents/issue-fixer.md` は prompt 全体の厳密一致を維持）。
 2. **CRITICAL: 完了報告を信用しない。** 機械検証・park 処理は [`subagent-delegation.md`](./subagent-delegation.md) を読んで実行する。検証できたら次に進む
-3. **再実行前の「新コミット確認」は不要（#3636 で gate 化済み）:** `tidd ai-review <PR番号> <試行回数>` が exit 2 かつ stderr に「新しいコミットがありません」を含む場合は人間エスカレーションとして扱う（修正を push せずに再実行した場合に gate が検出する）
+3. **再実行前の「新コミット確認」は不要（#3636 で gate 化済み）:** `uv run --project projects/py/tidd_tools tidd ai-review <PR番号> <試行回数>` が exit 2 かつ stderr に「新しいコミットがありません」を含む場合は人間エスカレーションとして扱う（修正を push せずに再実行した場合に gate が検出する）
 4. 試行回数をインクリメントして再実行する:
    ```bash
-   tidd ai-review <PR番号> 2  # 2回目
-   tidd ai-review <PR番号> 3  # 3回目
+   uv run --project projects/py/tidd_tools tidd ai-review <PR番号> 2  # 2回目
+   uv run --project projects/py/tidd_tools tidd ai-review <PR番号> 3  # 3回目
    ```
 
 ### エスカレーション時の処理
@@ -483,21 +484,21 @@ tail -1 ~/.cache/tidd/ai-reviewer/pr-<PR番号>/timing.json 2>/dev/null | grep -
 ### CI待機ロジック（APPROVE後）
 
 旧方式の `--watch` は進捗のたびに一覧を再描画し数百行が LLM の文脈に流れ込むため、
-`tidd wait-ci` で要約して待機する（Issue #3645）:
+`uv run --project projects/py/tidd_tools tidd wait-ci` で要約して待機する（Issue #3645）:
 
 ```bash
-tidd wait-ci <PR番号>
+uv run --project projects/py/tidd_tools tidd wait-ci <PR番号>
 ```
 
-`tidd wait-ci` はポーリング出力を capture して破棄し、最終結果のみを出力する。exit code の分岐:
+`uv run --project projects/py/tidd_tools tidd wait-ci` はポーリング出力を capture して破棄し、最終結果のみを出力する。exit code の分岐:
 
 | exit | 意味 | 対応 |
 |---|---|---|
-| 0 | 全チェック通過（stdout に `CI: all checks passed` の 1 行） | STEP 6（自動マージ）へ進む |
-| 1 | CI 失敗（stderr に失敗ジョブ名とログ URL） | 引数なし・`--unattended` なし → 「PR #N は CI 失敗のため人間マージが必要です」と記録し STEP 1 へ。単一番号・`--unattended` なし → 同文言で報告して終了。バッチ・`--unattended` なし → 「PR #N は CI 失敗。残りのキュー [...] は処理されませんでした」と報告して終了 |
+| 0 | 全チェック通過（stdout に `CI: all checks passed` の 1 行）。**または** PR に CI チェックが1件も存在しない（stdout に「チェックが1件も見つかりませんでした」）・PR が呼び出し時点で既に MERGED（stdout に「既にマージ済みです」）のいずれか（Issue #4048。「CI 失敗」とは区別されるため exit 1 にならない） | STEP 6（自動マージ）へ進む |
+| 1 | CI 失敗（実際に FAILURE / ERROR / CANCELLED のチェックが存在する場合のみ。stderr に失敗ジョブ名とログ URL） | 引数なし・`--unattended` なし → 「PR #N は CI 失敗のため人間マージが必要です」と記録し STEP 1 へ。単一番号・`--unattended` なし → 同文言で報告して終了。バッチ・`--unattended` なし → 「PR #N は CI 失敗。残りのキュー [...] は処理されませんでした」と報告して終了 |
 | 2 | タイムアウト（`--timeout` 秒を超過・stderr に PR の checks URL） | exit 1 と同様の失敗分岐（CI 状態が確定できないため）。`--timeout` を延長して再実行してもよい |
 
-**`is-unattended <N>` が exit 0 のとき:** CI 失敗（exit 1 / 2）を検知したら停止せず [`unattended-park-and-continue.md`](./unattended-park-and-continue.md) の手順を実行する（Issue コメントには `tidd wait-ci` の stderr 出力の CI ログ URL を含める）。
+**`is-unattended <N>` が exit 0 のとき:** CI 失敗（exit 1 / 2）を検知したら停止せず [`unattended-park-and-continue.md`](./unattended-park-and-continue.md) の手順を実行する（Issue コメントには `uv run --project projects/py/tidd_tools tidd wait-ci` の stderr 出力の CI ログ URL を含める）。
 
 ---
 

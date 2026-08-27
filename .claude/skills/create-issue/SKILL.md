@@ -3,7 +3,7 @@ name: create-issue
 description: GitHub Issue 本文を Claude Code Agent tool + subagent で生成する（Issue #1302 で Anthropic API 全廃）。バグ・改善点のコンテキストを渡すと必須セクション（## 背景 / ## やること / feat/fix なら ## 振る舞い）を含む Markdown 本文を返し、`gh issue create` で起票する。
 ---
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 # /create-issue
 
@@ -12,7 +12,7 @@ Codex では `agent_type` と `task_name` の両方を指定する。role regist
 message は自己完結させる。custom role が registry にない場合は、stderr に
 `issue_writer` と Codex 再起動・`.codex/agents/` 再読込手順を表示し、STEP 3 の明示定義を
 付けた default agent を 1 回だけ再試行する。再試行も失敗したら空の静的テンプレートへ
-フォールバックせず、原因を表示して終了する（対応表: `docs/reference/codex-interop.md` §6-5）。
+フォールバックせず、原因を表示して終了する（対応表: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布） §6-5）。
 
 Issue 本文生成 skill。Claude Code の Agent tool で `issue-writer` subagent を起動し、
 `.claude/rules/issue-creation.md` のフォーマット規約に沿った Markdown 本文を組み立てる。
@@ -59,11 +59,20 @@ gh issue list --state open --label "priority: low" --limit 100 --json number | j
 
 ### STEP 3: Agent tool で issue-writer subagent を起動
 
+起動前に実行環境を `claude_code` / `codex` のどちらかとして判定し、共通 routing を解決する。
+コマンドが非ゼロなら stderr をそのまま表示して終了し、subagent を起動しない。成功時は JSON の
+`native_mechanism` で起動 tool を選び、`agent_type` と `model`（`null` は指定省略）を起動引数へそのまま渡す。
+
+```bash
+uv run --project projects/py/tidd_tools tidd resolve-subagent-routing --launcher <claude_code|codex> --role issue-writer
+```
+
 以下のプロンプトで Agent tool を呼ぶ。STEP 2 で取得した分布を `priority_distribution` として渡す:
 
 ```
-Agent(  # Claude Code: Agent tool。Codex: spawn_agent(agent_type="issue_writer", task_name="issue_writer", message=<自己完結した生成指示>) に読み替え。fork_turns は省略
-  subagent_type="issue-writer",
+Agent(  # routing.native_mechanism を使う。Codex では spawn_agent(task_name="issue_writer", message=<自己完結した生成指示>)。fork_turns は省略
+  subagent_type=<routing.agent_type>,
+  model=<routing.model>,  # null の場合は省略
   description="Issue 本文生成",
   prompt=<type / title-short / context / priority_distribution を含むプロンプト>
 )
@@ -150,7 +159,7 @@ Claude Code は `.claude/skills/*/SKILL.md` を自動検出するため、ユー
 - **手動（メインの用途）**: Claude Code セッション内でユーザーが `/create-issue` を直接実行する
 - **自動起票フロー (`analyze_loop_errors.py` / `watch_circleci_failures.py`)**: 前者は `.claude/hooks/analyze-loop-on-stop.py` から `subprocess.Popen` で detach された Python サブプロセス、後者は `.circleci/config.yml` の job から起動される CircleCI 上の Python プロセスとして動く。どちらも **Claude Code CLI の LLM 会話ループの外側** で動くため、Agent tool は原理的に呼び出せない（Agent tool は Claude Code CLI 本体のツール呼び出しとしてのみ発火する）。したがって自動起票フローは skill 経由には切り替えず、`shared/llm_issue_body.py` の `enhance_issue_body()` no-op fallback により **常に template body のみ** で起票する（Anthropic API 呼び出しは #1281 / #1302 で廃止済み）。意味的な強化が必要な場合は、起票された Issue を後から Claude Code セッション内で `/issue-review` skill にかけて品質判定する運用でカバーする。
 
-**関連参照:** docs/reference/create-issue-skill.md の「呼び出しフロー」節に本 skill の起動シーケンス、`shared/llm_issue_body.py` の docstring に自動フロー側の fallback 挙動を記載している。
+**関連参照:** ai-dev-handbook 本体の docs/reference/ 配下・`create-issue-skill.md`（consumer 未配布） の「呼び出しフロー」節に本 skill の起動シーケンス、`shared/llm_issue_body.py` の docstring に自動フロー側の fallback 挙動を記載している。
 
 ## エラー処理（異常系）
 
@@ -200,5 +209,5 @@ Issue は起票しない。
 - `.claude/agents/issue-writer.md` — subagent 定義
 - `.claude/rules/issue-creation.md` — Issue 品質・フォーマット規約
 - `.claude/rules/tool-calling.md` — subagent 前提の Tool Calling 設計指針
-- docs/reference/create-issue-skill.md — 詳細ドキュメント
+- ai-dev-handbook 本体の docs/reference/ 配下・`create-issue-skill.md`（consumer 未配布） — 詳細ドキュメント
 - `tidd_tools.shared.llm_issue_body` モジュール — 互換性スタブ（常に fallback）

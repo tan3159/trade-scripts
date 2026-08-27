@@ -18,6 +18,7 @@ packages:
   - pyjwt           # PyJWT[crypto] の正規化名
   - pyyaml          # PyYAML の正規化名
   - cryptography    # PyJWT[crypto] の extras 依存
+  - detect-secrets  # detect-secrets-check サブコマンドの baseline 照合（Issue #4025）
 
   # ── tidd_tools dev 依存 ───────────────────────────────────────────
   - pytest

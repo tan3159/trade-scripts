@@ -78,6 +78,28 @@ _PR_CREATE_RE = re.compile(
 
 _KEYWORDS_YAML = _HOOKS_DIR.parent / "rules" / "manual-check-keywords.yaml"
 
+# Issue #4040: `use_issue_next=false` の consumer には
+# `.claude/skills/issue-next/` 配下が配布されないため、常にこのパスを案内すると
+# 常に無効なリンクになる（#4017 で確認済み）。実行時に配布状況を確認してから
+# 案内文を出し分ける。
+_AI_CONFIRM_VERIFICATION_SKILL_PATH = (
+    _HOOKS_DIR.parent / "skills" / "issue-next" / "ai-confirm-verification.md"
+)
+
+
+def _ai_confirm_verification_guidance(*, skill_deployed: bool) -> str:
+    """[AI確認] 項目の検証手順の案内文を返す（issue-next skill 配布状況で出し分け・#4040）."""
+    guidance = (
+        "検証は tidd ai-review が exit 4 を返した後、[AI確認] 項目を確認して"
+        "証跡を添えたうえで `gh pr edit` で `- [x]` に更新して行います。\n"
+    )
+    if skill_deployed:
+        guidance += (
+            "issue-next スキル利用時の詳細手順: "
+            ".claude/skills/issue-next/ai-confirm-verification.md\n"
+        )
+    return guidance
+
 
 def _load_keywords() -> list[dict[str, str]]:
     """manual-check-keywords.yaml からキーワードリストを読み込む."""
@@ -157,7 +179,7 @@ def _check_body(body: str, keywords: list[dict[str, str]]) -> list[str]:
                     f"このキーワードは AI が自動確認できない項目"
                     f"（ブラウザ目視・実機確認・法的判断等）に使われる言葉です。\n"
                     f"'[AI確認-post-merge]' プレフィックスに変更を検討してください。\n"
-                    f"詳細: docs/reference/hooks.md#detect-ai-confirm-misusepy"
+                    f"詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#detect-ai-confirm-misusepy`（consumer 未配布）"
                 )
     return warnings
 
@@ -218,9 +240,11 @@ def _main() -> int:
                 f"{items_text}\n"
                 "[AI確認] 項目は PR 作成時点では検証が発生し得ないため、"
                 "- [ ]（未チェック）で作成してください。\n"
-                "検証は tidd ai-review が exit 4 を返した後、"
-                ".claude/skills/issue-next/ai-confirm-verification.md の手順で行います。\n"
-                "詳細: docs/reference/hooks.md#detect-ai-confirm-misusepy\n"
+                + _ai_confirm_verification_guidance(
+                    skill_deployed=_AI_CONFIRM_VERIFICATION_SKILL_PATH.is_file()
+                )
+                + "詳細: 上流リポジトリ本体の docs/reference/ 配下・"
+                "`hooks.md#detect-ai-confirm-misusepy`（consumer 未配布）\n"
             )
             return 2
 
@@ -234,7 +258,7 @@ def _main() -> int:
                 "detect-ai-confirm-misuse: BLOCK: [手動] は廃止済みです。"
                 "[AI確認-post-merge] に書き換えてください。\n"
                 f"{items_text}\n"
-                "詳細: docs/reference/hooks.md#detect-ai-confirm-misusepy\n"
+                "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#detect-ai-confirm-misusepy`（consumer 未配布）\n"
             )
             return 2
         # gh pr edit は既存 PR 本文由来の [手動]（後方互換・自動転記由来）を
@@ -243,7 +267,7 @@ def _main() -> int:
             "detect-ai-confirm-misuse: WARNING: [手動] は廃止済みです。"
             "[AI確認-post-merge] に書き換えてください。\n"
             f"{items_text}\n"
-            "詳細: docs/reference/hooks.md#detect-ai-confirm-misusepy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#detect-ai-confirm-misusepy`（consumer 未配布）\n"
         )
 
     keywords = _load_keywords()

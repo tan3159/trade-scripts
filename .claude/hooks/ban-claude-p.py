@@ -126,7 +126,9 @@ def _main() -> int:
             "claude -p / --print はコストのかかる方法で AI を呼び出します。\n"
             "代わりに Claude Code の Agent tool（タスクを自律で実行する機能）を使ってください。\n"
         )
-        sys.stderr.write("詳細: Issue #565 / docs/reference/hooks.md#ban-claude-ppy\n")
+        sys.stderr.write(
+            "詳細: Issue #565 / 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-claude-ppy`（consumer 未配布）\n"
+        )
         return 2
 
     return 0

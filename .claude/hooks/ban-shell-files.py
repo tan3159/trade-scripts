@@ -139,7 +139,7 @@ def _main() -> int:
         "親 #1090（sh / bats 完全廃止プロジェクト）の方針です。\n"
         "やむを得ない一時バイパス: 環境変数 ALLOW_SH=1 を設定して再実行してください\n"
         "（CI ゲート `uv run python -m tidd_tools check-no-shell-files` でも検知されます）。\n"
-        "詳細: docs/reference/hooks.md#ban-shell-filespy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-shell-filespy`（consumer 未配布）\n"
     )
     return 2
 

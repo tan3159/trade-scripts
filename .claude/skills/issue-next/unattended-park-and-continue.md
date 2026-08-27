@@ -1,19 +1,19 @@
 # `--unattended` フラグ: park-and-continue 処理
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `--unattended` **なし（デフォルト）の場合、以下の節は一切参照せず本 SKILL の通常フロー（各 STEP のエスカレーション節）どおりに停止する。挙動は変更しない。**
 
 `--unattended` **あり**の場合、以下のエスカレーションが発生した時点で人間の応答を待って停止する代わりに *park-and-continue*（またはそれに準ずる自動継続）を実行する。**深夜放置運用（Issue #2802）を前提とするため、いずれの経路でも人間へのエスカレーションで停止することを一切許容しない:**
 
-**モードの確認（#3633）:** unattended モードは `init --unattended` で `cache/issue-next-state/issue-<N>.json` に `"unattended": true` として永続化される（`consume` 後も保持）。**現在のモードを確認するときは記憶に頼らず `tidd issue-next-state is-unattended <N>` を実行し、exit 0 = unattended / exit 1 = attended で判定する。** unattended 中は `block-unattended-escalation.py` hook が `AskUserQuestion` を exit 2 でブロックするため、人間待機で停止する経路は機械的に塞がれている（escape hatch: `SKIP_UNATTENDED_ESCALATION_GATE=1`・`docs/reference/hooks.md` 参照）。
+**モードの確認（#3633）:** unattended モードは `init --unattended` で `cache/issue-next-state/issue-<N>.json` に `"unattended": true` として永続化される（`consume` 後も保持）。**現在のモードを確認するときは記憶に頼らず `uv run --project projects/py/tidd_tools tidd issue-next-state is-unattended <N>` を実行し、exit 0 = unattended / exit 1 = attended で判定する。** unattended 中は `block-unattended-escalation.py` hook が `AskUserQuestion` を exit 2 でブロックするため、人間待機で停止する経路は機械的に塞がれている（escape hatch: `SKIP_UNATTENDED_ESCALATION_GATE=1`・ai-dev-handbook 本体の docs/reference/ 配下・`hooks.md`（consumer 未配布） 参照）。
 
 - STEP 1.5-d: Issue 品質チェックが「修正不能・判断不能」と判定された場合
 - STEP 2・STEP 5: issue-implementer / issue-fixer subagent が park を報告した場合（下記「STEP2/STEP5: park 報告時の拡張」参照）
-- STEP 5: `tidd ai-review` が終了コード 5（テスト status gate による中断・PR 起因テスト失敗・解決不能時）を返した場合（詳細: `existing-test-failure.md`「PR/pre-flight 起因時のエスカレーション」起点 A の `--unattended` 手順）
-- STEP 5: `tidd ai-review` が終了コード 2（エスカレーション）を返した場合
+- STEP 5: `uv run --project projects/py/tidd_tools tidd ai-review` が終了コード 5（テスト status gate による中断・PR 起因テスト失敗・解決不能時）を返した場合（詳細: `existing-test-failure.md`「PR/pre-flight 起因時のエスカレーション」起点 A の `--unattended` 手順）
+- STEP 5: `uv run --project projects/py/tidd_tools tidd ai-review` が終了コード 2（エスカレーション）を返した場合
 - STEP 5: 終了コード 4（`[手動]` 項目のみ残存）の場合（下記「exit 4: 手動確認待ちの `--unattended` 対応」）
-- STEP 5: CI 待機ロジック（`tidd wait-ci`・Issue #3645）が exit 1（CI 失敗）または exit 2（タイムアウト）を返した場合
+- STEP 5: CI 待機ロジック（`uv run --project projects/py/tidd_tools tidd wait-ci`・Issue #3645）が exit 1（CI 失敗）または exit 2（タイムアウト）を返した場合
 - STEP 6: `gh pr view --json state` で PR の state が `MERGED` と確認できない場合（#2802 以降は park-and-continue 対象。下記「STEP 6: MERGED 未確認時の park-and-continue」）
 
 ## exit 4: 手動確認待ちの `--unattended` 対応
@@ -42,7 +42,7 @@
 6. **次の Issue へ継続する**（park-and-continue 手順の 5 と同じ分岐。PR close は行わないため手順 3 相当は実施済みとして扱う）:
    - **引数なし:** STEP 1 の引数なしモード事前チェック（並行 PR 数の上限チェック）から再実行する
    - **単一番号指定:** 継続すべき次の番号がないため、park 完了を報告して終了する
-   - **バッチモード:** `tidd issue-next-state consume` で未処理キューの先頭を取り出し STEP 2 から継続する。キューが空なら「バッチ処理完了（park 分含む）」を報告して終了する
+   - **バッチモード:** `uv run --project projects/py/tidd_tools tidd issue-next-state consume` で未処理キューの先頭を取り出し STEP 2 から継続する。キューが空なら「バッチ処理完了（park 分含む）」を報告して終了する
 
 **対話セッション（`--unattended` なし）との違い:** 対話時は A/B 選択肢形式でユーザーに直接確認し、回答を得てから動作する。headless 環境では AskUserQuestion tool が存在しないため、この委譲フローを使う。
 
@@ -66,14 +66,14 @@
 
 ## park-and-continue 手順
 
-1. **Issue にエスカレーション内容を選択肢形式でコメント投稿する**（`.claude/rules/escalation-format.md` 準拠。Issue **本文は編集しない**、コメントのみに残す）
-2. Issue に `🙋 needs-human-input` ラベルを付与する
+1. **Issue にエスカレーション内容を選択肢形式でコメント投稿する**（`.claude/rules/escalation-format.md` 準拠。詳細なエスカレーション内容はコメントのみに残す）
+2. Issue に `🙋 needs-human-input` ラベルを付与する。**本文に既存の `## 判断してほしいこと` セクションが無い場合、`validate-issue.py` が `gh issue edit --add-label "🙋 needs-human-input"` を exit 2 でブロックする**（`--body`/`--body-file` 未指定時は既存本文をそのまま検査するため、コメントのみへの投稿では通過しない・#4028）。ブロックされた場合は本文へ機械ゲート通過用の最小限の `## 判断してほしいこと` セクション（詳細はコメントに委ね、1 行要約で可。例: `## 判断してほしいこと\n\n<選択肢の要約 1 文。詳細は上記コメント参照>`）を追記し、`gh issue edit <N> --body-file <file> --add-label "🙋 needs-human-input"` でラベル付与と同時に本文を更新する
 3. **PR が存在する場合**は `gh pr close <PR番号>` で取り下げる（ブランチ・レビューコメントは削除しない。Issue コメントに PR 番号をリンクする）。`gh pr close` が失敗した場合はコメントに「PR close 失敗（PR #<番号>）: 手動で close してください」を追記し、ラベル付与は維持したまま処理を継続する
-4. **worktree が存在する場合**はクリーンアップする。**PR 番号が存在する場合**はまず `gh pr view <PR番号> --json state -q .state` で state を確認し、**`MERGED` の場合**は `tidd cleanup-merged-branch <branch>` を実行する（worktree・branch 削除と同時に `step6-cleanup-done` を自己記録するため・#3556。生の `git worktree remove` / `git branch -D` を直接叩くと自己記録が漏れ `merge-summary:incomplete-marks` を誤検知する・#3865）。**PR 番号が存在しない場合（STEP 2 の pre-flight 失敗等、PR 作成前に park した場合）、または state が `MERGED` でない場合**（3 で `close` した通常経路）は、メインリポジトリへ移動して `git worktree remove <worktree パス>` のみ実行する。**この経路ではローカルブランチを削除しない**（生の `git branch -D` は `block-dangerous-git.py` が PR MERGED を安全条件として要求するため非 MERGED ブランチでは必ずブロックされ、`tidd cleanup-merged-branch` も同じ理由で使えない・#3865）。削除されず残ったローカルブランチは無害（次 Issue の処理を妨げない）なので、そのまま park-and-continue の継続を優先し、整理は別途人間判断に委ねる。STEP 1.5 時点のエスカレーション（STEP 2 未到達）では PR も worktree も存在しないため 3・4 はスキップする
+4. **worktree が存在する場合**はクリーンアップする。**PR 番号が存在する場合**はまず `gh pr view <PR番号> --json state -q .state` で state を確認し、**`MERGED` の場合**は `uv run --project projects/py/tidd_tools tidd cleanup-merged-branch <branch>` を実行する（worktree・branch 削除と同時に `step6-cleanup-done` を自己記録するため・#3556。生の `git worktree remove` / `git branch -D` を直接叩くと自己記録が漏れ `merge-summary:incomplete-marks` を誤検知する・#3865）。**PR 番号が存在しない場合（STEP 2 の pre-flight 失敗等、PR 作成前に park した場合）、または state が `MERGED` でない場合**（3 で `close` した通常経路）は、メインリポジトリへ移動して `git worktree remove <worktree パス>` のみ実行する。**この経路ではローカルブランチを削除しない**（生の `git branch -D` は `block-dangerous-git.py` が PR MERGED を安全条件として要求するため非 MERGED ブランチでは必ずブロックされ、`uv run --project projects/py/tidd_tools tidd cleanup-merged-branch` も同じ理由で使えない・#3865）。削除されず残ったローカルブランチは無害（次 Issue の処理を妨げない）なので、そのまま park-and-continue の継続を優先し、整理は別途人間判断に委ねる。STEP 1.5 時点のエスカレーション（STEP 2 未到達）では PR も worktree も存在しないため 3・4 はスキップする
 5. 次の Issue へ継続する（park 上限は設けない。無制限に継続する）:
    - **引数なし:** STEP 1 の引数なしモード事前チェック（並行 PR 数の上限チェック）から再実行する
    - **単一番号指定:** 継続すべき次の番号がないため、park 完了を報告して終了する
-   - **バッチモード:** `tidd issue-next-state consume` で未処理キューの先頭を取り出し STEP 2 から継続する。キューが空なら「バッチ処理完了（park 分含む）」を報告して終了する
+   - **バッチモード:** `uv run --project projects/py/tidd_tools tidd issue-next-state consume` で未処理キューの先頭を取り出し STEP 2 から継続する。キューが空なら「バッチ処理完了（park 分含む）」を報告して終了する
 
 ## 復帰手順（人間向け）
 

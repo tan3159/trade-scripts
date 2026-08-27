@@ -20,6 +20,7 @@ stdlib のみ使用。
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -29,7 +30,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.git_helpers import run_git as _run_git
 from _lib.hook_io import is_hook_enabled, read_hook_input
-from _lib.tidd_uvx import build_uvx_tidd_cmd
 
 
 def _resolve_cache_dir() -> Path:
@@ -381,8 +381,8 @@ def _run_health_check() -> None:
 
     consumer が tidd_tools を導入した場合、`.venv` には tidd_tools が入らないため
     `.venv/bin/python -m tidd_tools health-check` は「No module named tidd_tools」で
-    失敗し続ける。この場合は警告を出さず、`uvx` 経由の tidd 実行（ゼロインストール実行方式）へ
-    フォールバックする（Issue #2211・#3087）。
+    失敗し続ける。この場合は警告を出さず、vendor 配布済みの `projects/py/tidd_tools`
+    （Issue #3979）に対する `uv run --project` へフォールバックする（Issue #2211・#3984）。
     """
     if not is_hook_enabled("session-start-health-check"):
         return
@@ -423,15 +423,26 @@ def _run_health_check() -> None:
         if _MODULE_NOT_FOUND_MARKER not in result.stderr:
             _report_health_check_failure(result)
             return
-        # .venv に tidd_tools がない consumer 環境 → uvx フォールバックへ進む
+        # .venv に tidd_tools がない consumer 環境 → vendor 済み tidd_tools へフォールバックへ進む
 
-    uvx_cmd = build_uvx_tidd_cmd("health-check")
-    if uvx_cmd is None:
+    tidd_tools_project = root_path / "projects" / "py" / "tidd_tools"
+    if not tidd_tools_project.is_dir():
+        return
+
+    uv_bin = shutil.which("uv")
+    if uv_bin is None:
         return
 
     try:
         fallback_result = subprocess.run(
-            uvx_cmd,
+            [
+                uv_bin,
+                "run",
+                "--project",
+                str(tidd_tools_project),
+                "tidd",
+                "health-check",
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",

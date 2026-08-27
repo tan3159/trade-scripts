@@ -53,7 +53,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lib.hook_io import is_hook_enabled, read_hook_input
 
-DETAIL = "詳細: docs/reference/hooks.md#require-subagent-prompt-contractpy\n"
+DETAIL = "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-subagent-prompt-contractpy`（consumer 未配布）\n"
 
 # 契約フォーマット正規表現
 _ISSUE_NUM_RE = re.compile(r"^Issue番号:\s*\d+\s*$")

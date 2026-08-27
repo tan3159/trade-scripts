@@ -81,7 +81,7 @@ def _check_title_and_body(title: str, body: str, title_hint: str) -> int:
             "Issue ID なしで作成したい場合は PR ボディに以下を追加してください:\n"
             "  <!-- allow-no-issue-id: <理由> -->\n"
             "\n"
-            "詳細: docs/reference/hooks.md#require-issue-id-in-pr-titlepy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-issue-id-in-pr-titlepy`（consumer 未配布）\n"
         )
         return 2
 
@@ -98,7 +98,7 @@ def _check_title_and_body(title: str, body: str, title_hint: str) -> int:
             "\n"
             "  type は次のいずれかです: feat / fix / docs / refactor / ci / build / chore / research\n"
             "\n"
-            "詳細: docs/reference/hooks.md#require-issue-id-in-pr-titlepy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-issue-id-in-pr-titlepy`（consumer 未配布）\n"
         )
         return 2
 
@@ -117,7 +117,7 @@ def _check_title_and_body(title: str, body: str, title_hint: str) -> int:
         "Issue ID なしで作成したい場合は PR ボディに以下を追加してください:\n"
         "  <!-- allow-no-issue-id: <理由> -->\n"
         "\n"
-        "詳細: docs/reference/hooks.md#require-issue-id-in-pr-titlepy\n"
+        "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-issue-id-in-pr-titlepy`（consumer 未配布）\n"
     )
     return 2
 

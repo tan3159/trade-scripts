@@ -71,7 +71,9 @@ def _main() -> int:
             "BLOCK: 新規ブランチは main から切ってください。"
             "git checkout main && git pull を実行してください\n"
         )
-        sys.stderr.write("詳細: docs/reference/hooks.md#require-main-syncpy\n")
+        sys.stderr.write(
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-main-syncpy`（consumer 未配布）\n"
+        )
         return 2
 
     # origin/main をフェッチ（失敗しても継続）
@@ -89,7 +91,9 @@ def _main() -> int:
             "BLOCK: main が origin/main と一致しません。"
             "git checkout main && git pull を実行してください\n"
         )
-        sys.stderr.write("詳細: docs/reference/hooks.md#require-main-syncpy\n")
+        sys.stderr.write(
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-main-syncpy`（consumer 未配布）\n"
+        )
         return 2
 
     return 0

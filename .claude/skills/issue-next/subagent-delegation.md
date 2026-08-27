@@ -1,6 +1,6 @@
 # subagent 委譲: 機械検証・park 処理（Issue #2452）
 
-> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: `docs/reference/codex-interop.md`「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
+> **実行環境（ツール名の読み替え）:** 本スキルのツール名参照は Claude Code 前提で記載している。Codex（`.agents/skills` symlink 経由）で実行する場合は、`Agent(subagent_type="x", ...)` → `spawn_agent(agent_type="x", task_name="x", message=...)` に読み替える（`task_name` のみでは default ロールの agent が起動し `.claude/agents/*.md` 相当のツール制約・output_format 契約が適用されない・Issue #3491。対応表・実測記録: ai-dev-handbook 本体の docs/reference/ 配下・`codex-interop.md`（consumer 未配布）「6-4. spawn_agent の `agent_type` 未指定時は default ロールが起動する」）。`Edit` / `Write` → `apply_patch` に読み替える。GitHub 操作は Claude Code・Codex いずれも `gh` CLI を使う（`mcp__github__*` は廃止済み・Issue #3773）。
 
 `/issue-next` の STEP 2（issue-implementer 委譲）・STEP 5 リトライループ（issue-fixer 委譲）で
 共通する完了報告の機械検証手順と park 処理を定義する。
@@ -12,6 +12,7 @@
 - [報告なしで委譲が終わった場合の作業回収（Issue #2668）](#報告なしで委譲が終わった場合の作業回収issue-2668)
 - [STEP 5: issue-fixer 完了報告の機械検証](#step-5-issue-fixer-完了報告の機械検証)
 - [skip 時の処理（ファイル競合検出・Issue #2452）](#skip-時の処理ファイル競合検出issue-2452)
+- [diff-size gate park の追加検証（Issue #3992）](#diff-size-gate-park-の追加検証issue-3992)
 - [park 時の処理](#park-時の処理)
 
 ---
@@ -41,7 +42,7 @@ issue-implementer の多階層委譲時に実際に約1時間発生した）。
 1. **PR 実在・OPEN:** `gh pr view <報告PR番号> --json state,body,commits` が成功し、
    かつ `state` が `OPEN` であること（closed/merged 番号の誤報告を弾く）
 2. **closes 記載:** 返り値の `body` または commits の中に `closes #<N>` が含まれること
-3. **TDD 未実施の疑い:** `tidd tdd-check <報告PR番号>` を実行し exit code を見る。exit 0 なら疑いなし、
+3. **TDD 未実施の疑い:** `uv run --project projects/py/tidd_tools tidd tdd-check <報告PR番号>` を実行し exit code を見る。exit 0 なら疑いなし、
    exit 1 なら疑いあり（`require-red-first.py` と同一ロジックを `.claude/hooks/_lib/tdd_order_check.py`
    から共有・#2895）。exit 2（PR/git 取得失敗）は機械検証の実行エラーとして park 扱いにする
 
@@ -61,6 +62,20 @@ exit 1（契約違反）の場合は park 処理に加えて:
 - **マージ済みコードを親セッションが直接検証する**（`gh pr diff <PR番号>` を確認し、変更ファイルに
   `tidd_tools/ai_review/` が含まれる parser critical PR なら
   `parser-critical-pr.md` に従い事後の異バックエンド合議レビューを実施する。欠陥が見つかれば Issue 起票）
+
+**この 1 回のチェックだけでは、報告受領後の STEP 3〜5 の処理中に発生する逸脱（追加コミット・
+PR本文の書き換え・park-and-continue の無断実行等）を検知できない（Issue #4029 の実インシデント）。**
+そのため検証をすべて満たしたら、STEP 3 へ進む前に drift チェックの baseline を記録する（#4038）:
+
+```bash
+uv run --project projects/py/tidd_tools tidd issue-next-state observe-pr <N> <報告PR番号>
+```
+
+以降、`gh pr edit`/`gh pr merge`/`gh pr close`（自分自身が実行する場合・subagent が実行しようと
+した場合の両方）は `require-pr-state-drift-check.py`（PreToolUse hook・default OFF）が、この
+baseline と実行直前の実際の PR 状態（`state`/`headRefOid`/`updatedAt`）を照合する。不一致
+（drift）があれば該当コマンドは exit 2 でブロックされる。詳細:
+`docs/reference/action-log-and-drift-check.md`。
 
 検証をすべて満たしたら STEP 3 へ進む。
 
@@ -103,7 +118,7 @@ git worktree list --porcelain | grep "^worktree " | awk '{print $2}' | while rea
     [ "$unpushed" -eq 0 ] && continue  # push 済み = 回収不要
   fi
   # liveness チェックを通過してから "回収対象" を出力する（#2705）
-  if tidd issue-next-state check-liveness <N>; then
+  if uv run --project projects/py/tidd_tools tidd issue-next-state check-liveness <N>; then
     echo "回収対象: $wt (branch: $branch, commits ahead of origin/main: $ahead)"
   else
     echo "他セッションが作業中のため回収を見送る: $wt (branch: $branch)"
@@ -127,7 +142,7 @@ done
 
 ```bash
 cd <対象 worktree>
-tidd pre-flight
+uv run --project projects/py/tidd_tools tidd pre-flight
 ```
 
 - **exit 0（GREEN）:** 手順 3 へ進む
@@ -181,7 +196,7 @@ pre-flight が exit 1 の場合は、worktree を削除せずに park 扱いと�
 ## skip 時の処理（ファイル競合検出・Issue #2452）
 
 issue-implementer が `skip: <理由>` / `issue: #<N>` を報告した場合（他 OPEN PR とのファイル競合・並行 PR
-上限検出。旧 SKILL.md STEP 3 の `tidd check-pr-conflicts` 相当）は park と異なり人間判断不要のため、
+上限検出。旧 SKILL.md STEP 3 の `uv run --project projects/py/tidd_tools tidd check-pr-conflicts` 相当）は park と異なり人間判断不要のため、
 機械検証もラベル付与も行わない（subagent が Issue コメント投稿・worktree 削除まで完了済み）。
 
 **CRITICAL: skip 後の state クリーンアップは親セッションの責務（Issue #3449）。** subagent は worktree 削除・Issue コメント投稿までしか完了しておらず、
@@ -210,6 +225,13 @@ if [ "$state" = "MERGED" ]; then
 fi
 ```
 
+MERGED でなければ drift チェックの baseline を更新する（#4038。詳細は STEP 2 と同じ
+`docs/reference/action-log-and-drift-check.md` を参照）:
+
+```bash
+uv run --project projects/py/tidd_tools tidd issue-next-state observe-pr <N> <PR番号>
+```
+
 次に push された SHA を検証する:
 
 ```bash
@@ -224,6 +246,51 @@ cd <worktree パス> && git pull origin <branch> --ff-only
 ```
 
 検証できたら STEP 5 のリトライループへ進む（再実行前の新コミット確認は不要・#3636 で gate 化済み）。
+
+---
+
+## diff-size gate park の追加検証（Issue #3992・#3994）
+
+issue-implementer の park 報告理由に「diff-size」（`uv run --project projects/py/tidd_tools tidd pre-flight` の 1000 行超ゲート・#3081）が
+含まれる場合、下記「park 時の処理」の通常フローに入る前に、オーケストレータ自身が分割可能性を
+独立に検証する。issue-implementer は `allow-xxl` / `allow-large-pr` マーカーを自己判断で付与
+することを禁止されており（`.claude/agents/issue-implementer.md`・`block-subagent-size-marker.py`
+hook が機械ブロック）、park コメントに書かれた「分割不能」の理由をそのまま採用しない
+（実例: #3992 で「4 シナリオが相互依存し分割不能」と自己申告されたが、実際は関数単位で
+きれいに分離できた）。マーカーの置き場所は PR ボディに統一されている（Issue #3994）。
+
+### 検証手順
+
+1. 対象 worktree で `git diff origin/main...HEAD --stat` を実行し、変更ファイルの境界を洗い出す
+2. Issue の `## やること` / `## 振る舞い`（Gherkin Scenario）を読み、ai-dev-handbook 本体の docs/reference/ 配下・`pr-splitting-guide.md`（consumer 未配布）の
+   「分割してはいけないケース（例外リスト）」6 項目のいずれかに該当するかを **オーケストレータ自身が**
+   diff・Scenario の内容から判定する（issue-implementer の park コメントの理由をそのまま信用しない）
+3. **6 項目のいずれにも明確に該当しない、または判定できない** → 「分割可能（または判定不能）」として
+   扱い、下記「park 時の処理」の通常フロー（human へのエスカレーション）へ進む。オーケストレータ自身は
+   PR の再設計・分割実装を行わない
+4. **6 項目のいずれかに明確に該当する** → 「分割不能」と判定し、下記の手順でマーカーを追加して続行する
+
+### 分割不能と判定した場合の続行手順
+
+issue-implementer は RED→GREEN のコミットを完了済み（diff-size は commit 後の pre-flight で
+検出されるため）。マーカーの置き場所は PR ボディに統一されており（Issue #3994）、
+`uv run --project projects/py/tidd_tools tidd pre-flight` はもうコミットメッセージのマーカーを受理しない。PR がまだ存在せず
+PR ボディにマーカーを書けないため、オーケストレータ自身が worktree に入り、緊急スキップ
+環境変数で一時的に pre-flight を通過させる:
+
+```bash
+cd <worktree>
+PRE_FLIGHT_SKIP_DIFF_SIZE=1 uv run --project projects/py/tidd_tools tidd pre-flight   # exit 0 を確認
+```
+
+pre-flight が GREEN になったら、issue-implementer.md の手順 9〜11（evidence-based tick・
+Test plan 自己検証・`gh pr create`）をオーケストレータ自身が実行する。`gh pr create --body` に
+`<!-- allow-xxl: <検証した具体的理由（例外リストのどの項目に該当するか）> -->` を含めること
+（PR ボディが pre-flight の再実行時と ai-review の size/XXL gate・`size_gate.py` の両方が
+参照する単一の置き場所）。`block-subagent-size-marker.py` hook は `agent_type` が
+`issue-next` / `issue-next-all` の `gh pr create` 呼び出しを許可リスト対象としているため、
+このマーカー付き PR 作成はブロックされない。Issue に付与済みの `🙋 needs-human-input`
+ラベルは除去し、検証内容（該当した例外リスト項目・判断根拠）を Issue コメントに記録する。
 
 ---
 

@@ -470,7 +470,7 @@ def _main() -> int:
             f"require-red-first.py: {error}\n"
             "分割不能な正当な理由がある場合は、PR 本文（PR ボディ）に以下を追加してください:\n"
             "  <!-- allow-single-commit: <理由> -->\n"
-            "詳細: docs/reference/hooks.md#require-red-firstpy\n"
+            "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-red-firstpy`（consumer 未配布）\n"
         )
         return 2
 
@@ -481,7 +481,7 @@ def _main() -> int:
             sys.stderr.write(
                 f"require-red-first.py: RED 実証に失敗しました。テスト初出コミット時点で全テストが pass しています\n"
                 f"詳細: {proof_error}\n"
-                "詳細: docs/reference/hooks.md#require-red-firstpy\n"
+                "詳細: 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#require-red-firstpy`（consumer 未配布）\n"
             )
             return 2
 

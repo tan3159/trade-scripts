@@ -218,7 +218,7 @@ def _blocked_message(location: str, word: str) -> str:
         "再発を防ぐためブロックされています。\n"
         "誤検知の場合は .claude/ng-words.local.txt または"
         " ~/.config/tidd_tools/ng-words.toml の該当エントリを見直してください。\n"
-        "詳細: Issue #2308 #2418 / docs/reference/hooks.md#ban-ng-wordspy\n"
+        "詳細: Issue #2308 #2418 / 上流リポジトリ本体の docs/reference/ 配下・`hooks.md#ban-ng-wordspy`（consumer 未配布）\n"
     )
 
 
